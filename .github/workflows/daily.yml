@@ -1,0 +1,60 @@
+name: Daily screen
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 22:30 UTC Mon-Fri = 6:30 am Malaysia time, after the US close
+  workflow_dispatch:           # adds a "Run workflow" button
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore fundamentals cache
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: fundamentals-${{ github.run_id }}
+          restore-keys: fundamentals-
+
+      - name: Run screener
+        run: python screener.py
+
+      - name: Save fundamentals cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: fundamentals-${{ github.run_id }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
