@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Halal strength">
+<title>Halal strength</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{
+  --bg:#F3F6F6; --raise:#FFFFFF; --line:#DCE4E6; --text:#10212A; --muted:#5E737D;
+  --gold:#9C700C; --up:#1E8E64; --down:#C2473A; --focus:#2F6FB0;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0E1A21; --raise:#152630; --line:#233844; --text:#E6ECEE; --muted:#8BA0AA;
+    --gold:#D9A93F; --up:#3DB58A; --down:#E06A5B; --focus:#7FB2E5;
+    color-scheme: dark;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 "Instrument Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.wrap{max-width:980px;margin:0 auto;padding:20px 16px 48px}
+
+header h1{font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;margin:0}
+header p{margin:6px 0 0;color:var(--muted)}
+header strong{color:var(--text);font-weight:600}
+
+.tabs{display:flex;gap:4px;margin:22px 0 14px;background:var(--raise);border:1px solid var(--line);
+  border-radius:10px;padding:4px;width:max-content}
+.tabs button{border:0;background:none;padding:7px 14px;border-radius:7px;cursor:pointer;color:var(--muted);font-weight:500}
+.tabs button[aria-selected="true"]{background:var(--bg);color:var(--text)}
+
+.tools{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.tools input,.tools select{background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.tools input{flex:1;min-width:160px}
+
+.list{background:var(--raise);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.row{display:grid;grid-template-columns:52px 1fr auto;gap:2px 12px;align-items:center;width:100%;
+  text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:12px 14px;cursor:pointer}
+.row:first-child{border-top:0}
+.row:hover{background:color-mix(in srgb,var(--bg) 60%,transparent)}
+.score{grid-row:span 2;font-size:26px;font-weight:700;letter-spacing:-.03em;color:var(--muted)}
+.score.hi{color:var(--gold)} .score.mid{color:var(--text)}
+.tk{font-weight:600}
+.nm{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.px{text-align:right;font-weight:500}
+.ch{text-align:right;font-size:13px}
+.up{color:var(--up)} .down{color:var(--down)}
+.levels{grid-column:2 / -1;display:flex;gap:14px;font-size:13px;color:var(--muted);margin-top:4px}
+.levels b{color:var(--text);font-weight:500}
+.empty{padding:24px 16px;color:var(--muted)}
+h2{font-size:15px;font-weight:600;margin:26px 0 8px}
+h2 span{color:var(--muted);font-weight:400}
+.more{display:block;margin:12px auto 0;background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:8px 16px;cursor:pointer}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:9px 10px;text-align:right;border-top:1px solid var(--line);white-space:nowrap}
+th{border-top:0;font-weight:500;color:var(--muted);font-size:13px}
+th button{background:none;border:0;padding:0;cursor:pointer;color:inherit}
+th[aria-sort] button{color:var(--text)}
+td:first-child,th:first-child{text-align:left}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:color-mix(in srgb,var(--bg) 60%,transparent)}
+td.s{font-weight:700}
+.tablewrap{overflow-x:auto}
+@media (max-width:640px){ .opt{display:none} }
+
+.sheet{position:fixed;inset:0;background:rgba(5,12,16,.55);display:none;align-items:flex-end;justify-content:center;z-index:10}
+.sheet.open{display:flex}
+.panel{background:var(--bg);width:100%;max-width:980px;max-height:94vh;overflow:auto;border-radius:16px 16px 0 0;
+  padding:18px 16px calc(24px + env(safe-area-inset-bottom))}
+@media (min-width:760px){ .sheet{align-items:center} .panel{border-radius:16px;max-height:90vh} }
+@media (prefers-reduced-motion:no-preference){ .sheet.open .panel{animation:rise .22s ease-out} }
+@keyframes rise{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+.ph{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.ph h3{margin:0;font-size:22px;letter-spacing:-.02em}
+.ph p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.close{background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+.charts{display:grid;gap:10px;margin:14px 0}
+@media (min-width:760px){ .charts{grid-template-columns:3fr 2fr} }
+.chartbox{background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:8px}
+.chartbox h4{margin:2px 4px 6px;font-size:12px;font-weight:500;color:var(--muted)}
+.chart{height:280px}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.fact{background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.fact h4{margin:0 0 6px;font-size:12px;font-weight:500;color:var(--muted)}
+.fact div{display:flex;justify-content:space-between;font-size:14px}
+.fact div+div{margin-top:3px}
+.note{color:var(--muted);font-size:12px;margin-top:28px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Halal strength</h1>
+    <p id="summary"></p>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="today">Today</button>
+    <button role="tab" aria-selected="false" data-tab="all">All stocks</button>
+  </div>
+
+  <section id="today">
+    <h2>Setups <span id="setupCount"></span></h2>
+    <div class="list" id="setups"></div>
+    <h2>Strongest names</h2>
+    <div class="list" id="strongest"></div>
+  </section>
+
+  <section id="all" hidden>
+    <div class="tools">
+      <input id="q" type="search" placeholder="Search ticker, name or industry" aria-label="Search">
+      <select id="minScore" aria-label="Minimum score">
+        <option value="0">Any score</option><option value="70">Score 70+</option>
+        <option value="80">Score 80+</option><option value="90">Score 90+</option>
+      </select>
+    </div>
+    <div class="list tablewrap">
+      <table>
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <button class="more" id="more" hidden>Show 100 more</button>
+  </section>
+
+  <p class="note" id="note"></p>
+</div>
+
+<div class="sheet" id="sheet" aria-hidden="true">
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="sTitle">
+    <div class="ph">
+      <div><h3 id="sTitle"></h3><p id="sSub"></p></div>
+      <button class="close" id="close">Close</button>
+    </div>
+    <div class="charts" id="charts">
+      <div class="chartbox"><h4>Daily, 21 EMA and 50 SMA</h4><div class="chart" id="cD"></div></div>
+      <div class="chartbox"><h4>Weekly, 10 SMA</h4><div class="chart" id="cW"></div></div>
+    </div>
+    <div class="facts" id="facts"></div>
+  </div>
+</div>
+
+<script>
+const D = __DATA__;
+const $ = s => document.querySelector(s);
+const pct = (v, d = 0) => v == null ? "–" : (v * 100).toFixed(d) + "%";
+const signed = v => v == null ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+const money = v => v == null ? "–" : v.toFixed(2);
+const sClass = s => s >= 90 ? "hi" : s >= 80 ? "mid" : "";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const byT = Object.fromEntries(D.stocks.map(s => [s.t, s]));
+
+const asof = new Date(D.asof + "T12:00:00Z").toLocaleDateString(undefined, {day:"numeric", month:"short", year:"numeric"});
+const setups = D.stocks.filter(s => s.setup);
+$("#summary").innerHTML = `<strong>${D.stocks.length}</strong> Shariah-compliant stocks ranked from ${D.universe} liquid US stocks. Prices as of ${asof}.`;
+$("#setupCount").textContent = setups.length ? `(${setups.length})` : "";
+const methodText = D.method === "SC" ? "total assets" : "24-month average market cap";
+$("#note").textContent = `Shariah screen: business activity, debt and cash each at most ${pct(D.debtLimit)} of ${methodText}. ` +
+  `Fundamentals are refreshed monthly; verify a stock's status before buying. Personal research tool, not investment advice. Built ${D.built}.`;
+
+function row(s, withLevels) {
+  const lv = withLevels && s.setup ? `<div class="levels">
+      <span>Entry <b>${money(s.setup.entry)}</b></span><span>Stop <b>${money(s.setup.stop)}</b></span>
+      <span>Target <b>${money(s.setup.target)}</b></span><span>Risk <b>${pct(s.setup.risk, 1)}</b></span></div>` : "";
+  return `<button class="row" data-t="${esc(s.t)}">
+    <span class="score ${sClass(s.score)}">${s.score}</span>
+    <span class="tk">${esc(s.t)}</span>
+    <span class="px">${money(s.price)}</span>
+    <span class="nm">${esc(s.n)}</span>
+    <span class="ch ${s.chg >= 0 ? "up" : "down"}">${signed(s.chg)}</span>${lv}
+  </button>`;
+}
+$("#setups").innerHTML = setups.length ? setups.map(s => row(s, true)).join("")
+  : `<div class="empty">No stocks meet the setup rules today. Check the strongest names below, or look again after the next close.</div>`;
+$("#strongest").innerHTML = D.stocks.slice(0, 10).map(s => row(s, false)).join("");
+
+// ---- all stocks table
+const cols = [
+  ["t", "Stock"], ["score", "Score"], ["rs", "RS"], ["eps", "EPS"], ["sales", "Sales", "opt"],
+  ["grp", "Group", "opt"], ["off", "Off high", "opt"], ["price", "Price"], ["chg", "Day"],
+];
+let sortKey = "score", sortDir = -1, shown = 100;
+function renderHead() {
+  $("#thead").innerHTML = cols.map(([k, label, cls]) =>
+    `<th class="${cls || ""}" ${k === sortKey ? `aria-sort="${sortDir < 0 ? "descending" : "ascending"}"` : ""}>
+      <button data-k="${k}">${label}${k === sortKey ? (sortDir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("");
+}
+function renderTable() {
+  const q = $("#q").value.trim().toLowerCase(), min = +$("#minScore").value;
+  let rows = D.stocks.filter(s => s.score >= min &&
+    (!q || s.t.toLowerCase().includes(q) || (s.n || "").toLowerCase().includes(q) || (s.ind || "").toLowerCase().includes(q)));
+  rows.sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    if (typeof x === "string") return sortDir * x.localeCompare(y);
+    return sortDir * ((x ?? -1e9) - (y ?? -1e9));
+  });
+  $("#more").hidden = rows.length <= shown;
+  $("#tbody").innerHTML = rows.slice(0, shown).map(s => `<tr data-t="${esc(s.t)}" tabindex="0">
+    <td><span class="tk">${esc(s.t)}</span></td><td class="s">${s.score}</td><td>${s.rs}</td><td>${s.eps}</td>
+    <td class="opt">${s.sales}</td><td class="opt">${s.grp}</td><td class="opt">${pct(s.off)}</td>
+    <td>${money(s.price)}</td><td class="${s.chg >= 0 ? "up" : "down"}">${signed(s.chg)}</td></tr>`).join("") ||
+    `<tr><td colspan="9" class="empty" style="text-align:left">No stocks match. Clear the search or lower the minimum score.</td></tr>`;
+}
+$("#thead").addEventListener("click", e => {
+  const k = e.target.closest("button")?.dataset.k; if (!k) return;
+  sortDir = k === sortKey ? -sortDir : (k === "t" ? 1 : -1); sortKey = k; renderHead(); renderTable();
+});
+$("#q").addEventListener("input", () => { shown = 100; renderTable(); });
+$("#minScore").addEventListener("change", () => { shown = 100; renderTable(); });
+$("#more").addEventListener("click", () => { shown += 100; renderTable(); });
+renderHead(); renderTable();
+
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b));
+  $("#today").hidden = b.dataset.tab !== "today"; $("#all").hidden = b.dataset.tab !== "all";
+}));
+
+// ---- detail sheet with charts
+let charts = [];
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function ema(d, n) { const k = 2 / (n + 1); let e; return d.map((b, i) => { e = i ? b.close * k + e * (1 - k) : b.close; return { time: b.time, value: e }; }).slice(n); }
+function sma(d, n) { const o = []; let s = 0; d.forEach((b, i) => { s += b.close; if (i >= n) s -= d[i - n].close; if (i >= n - 1) o.push({ time: b.time, value: s / n }); }); return o; }
+function weekly(d) {
+  const m = new Map();
+  d.forEach(b => {
+    const t = new Date(b.time + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+    const k = t.toISOString().slice(0, 10), w = m.get(k);
+    if (!w) m.set(k, { time: k, open: b.open, high: b.high, low: b.low, close: b.close });
+    else { w.high = Math.max(w.high, b.high); w.low = Math.min(w.low, b.low); w.close = b.close; }
+  });
+  return [...m.values()];
+}
+function makeChart(el, data, lines, s, bars) {
+  const c = LightweightCharts.createChart(el, {
+    autoSize: true,
+    layout: { background: { color: "transparent" }, textColor: cssVar("--muted"), fontFamily: "Instrument Sans, system-ui, sans-serif" },
+    grid: { vertLines: { visible: false }, horzLines: { color: cssVar("--line") } },
+    rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false },
+    crosshair: { mode: 0 },
+  });
+  const up = cssVar("--up"), dn = cssVar("--down");
+  const cs = c.addCandlestickSeries({ upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn, borderVisible: false });
+  cs.setData(data);
+  lines.forEach(([pts, color]) => c.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }).setData(pts));
+  if (s.setup) [["Entry", s.setup.entry, cssVar("--gold")], ["Stop", s.setup.stop, dn], ["Target", s.setup.target, up]]
+    .forEach(([title, price, color]) => cs.createPriceLine({ price, color, title, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
+  c.timeScale().setVisibleLogicalRange({ from: data.length - bars, to: data.length + 2 });
+  charts.push(c);
+}
+function fact(title, pairs) {
+  return `<div class="fact"><h4>${title}</h4>${pairs.map(([a, b]) => `<div><span>${a}</span><span>${b}</span></div>`).join("")}</div>`;
+}
+async function openStock(t) {
+  const s = byT[t]; if (!s) return;
+  $("#sTitle").textContent = `${s.t}  ${money(s.price)}`;
+  $("#sSub").textContent = [s.n, s.ind].filter(Boolean).join(", ");
+  const checked = s.checked ? new Date(s.checked + "T12:00:00Z").toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "–";
+  $("#facts").innerHTML =
+    (s.setup ? fact("Setup", [["Entry", money(s.setup.entry)], ["Stop", money(s.setup.stop)], ["Target", money(s.setup.target)], ["Risk", pct(s.setup.risk, 1)]]) : "") +
+    fact(`Score ${s.score}`, [["Relative strength", s.rs], ["EPS growth", s.eps], ["Sales growth", s.sales], ["Volume", s.vol], ["Near 52w high", s.hi], ["Group strength", s.grp]]) +
+    fact("Fundamentals", [["EPS growth (q/q yoy)", signed(s.epsg)], ["Sales growth", signed(s.salesg)], ["P/E", s.pe ?? "–"], ["Off 52w high", pct(s.off, 1)]]) +
+    fact("Shariah", [["Debt ratio", pct(s.debt, 1)], ["Cash ratio", pct(s.cash, 1)], ["Last checked", checked]]);
+  charts.forEach(c => c.remove()); charts = [];
+  $("#sheet").classList.add("open"); $("#sheet").setAttribute("aria-hidden", "false"); $("#close").focus();
+  const box = $("#charts");
+  if (!s.chart || !window.LightweightCharts) { box.hidden = true; return; }
+  box.hidden = false; $("#cD").innerHTML = '<div class="empty">Loading chart…</div>'; $("#cW").innerHTML = "";
+  try {
+    const raw = await (await fetch(`data/${encodeURIComponent(s.t)}.json`)).json();
+    const d = raw.map(b => ({ time: b[0], open: b[1], high: b[2], low: b[3], close: b[4] }));
+    const w = weekly(d);
+    $("#cD").innerHTML = "";
+    makeChart($("#cD"), d, [[ema(d, 21), cssVar("--gold")], [sma(d, 50), cssVar("--muted")]], s, innerWidth < 640 ? 80 : 130);
+    makeChart($("#cW"), w, [[sma(w, 10), cssVar("--gold")]], s, innerWidth < 640 ? 45 : 60);
+  } catch (e) { $("#cD").innerHTML = '<div class="empty">Chart data could not be loaded. Refresh the page and try again.</div>'; }
+}
+function closeSheet() { $("#sheet").classList.remove("open"); $("#sheet").setAttribute("aria-hidden", "true"); charts.forEach(c => c.remove()); charts = []; }
+document.addEventListener("click", e => { const el = e.target.closest("[data-t]"); if (el) openStock(el.dataset.t); });
+$("#tbody").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.dataset.t) openStock(e.target.dataset.t); });
+$("#close").addEventListener("click", closeSheet);
+$("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") closeSheet(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
+</script>
+</body>
+</html>
