@@ -37,6 +37,8 @@ jobs:
 
       - name: Run screener
         run: python screener.py
+        env:
+          HOLDINGS: ${{ secrets.HOLDINGS }}
 
       - name: Save fundamentals cache
         if: always()
