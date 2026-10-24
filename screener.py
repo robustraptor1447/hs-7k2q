@@ -68,7 +68,7 @@ SETUP_TARGET_R = 2.5         # target = entry + 2.5 x risk
 
 # Fundamentals refresh
 FUND_REFRESH_DAYS = 30
-MAX_FUND_FETCH_PER_RUN = 3000
+MAX_FUND_FETCH_PER_RUN = 600
 FUND_SLEEP = 0.3             # seconds between Yahoo requests
 
 # Charts are saved for halal stocks scoring at least this (plus every setup)
