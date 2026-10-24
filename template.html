@@ -37,6 +37,20 @@ header h1{font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;m
 header p{margin:6px 0 0;color:var(--muted)}
 header strong{color:var(--text);font-weight:600}
 
+/* market banner: the one bold element on the page */
+.market{display:block;width:100%;text-align:left;margin-top:18px;background:var(--raise);
+  border:1px solid var(--line);border-left:6px solid var(--state);border-radius:12px;padding:14px 16px;cursor:pointer}
+.market[data-state="Uptrend"]{--state:var(--up)}
+.market[data-state="Caution"]{--state:var(--gold)}
+.market[data-state="Downtrend"]{--state:var(--down)}
+.mtop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.mstate{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1;color:var(--state)}
+.msince{color:var(--muted);font-size:13px}
+.madvice{margin:8px 0 10px}
+.mstats{display:flex;gap:4px 18px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.mstats b{color:var(--text);font-weight:500}
+.mlink{display:block;margin-top:10px;font-size:13px;color:var(--focus);font-weight:500}
+
 .tabs{display:flex;gap:4px;margin:22px 0 14px;background:var(--raise);border:1px solid var(--line);
   border-radius:10px;padding:4px;width:max-content}
 .tabs button{border:0;background:none;padding:7px 14px;border-radius:7px;cursor:pointer;color:var(--muted);font-weight:500}
@@ -49,6 +63,7 @@ header strong{color:var(--text);font-weight:600}
 .list{background:var(--raise);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .row{display:grid;grid-template-columns:52px 1fr auto;gap:2px 12px;align-items:center;width:100%;
   text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:12px 14px;cursor:pointer}
+.row.hold{grid-template-columns:62px 1fr auto}
 .row:first-child{border-top:0}
 .row:hover{background:color-mix(in srgb,var(--bg) 60%,transparent)}
 .score{grid-row:span 2;font-size:26px;font-weight:700;letter-spacing:-.03em;color:var(--muted)}
@@ -58,11 +73,20 @@ header strong{color:var(--text);font-weight:600}
 .px{text-align:right;font-weight:500}
 .ch{text-align:right;font-size:13px}
 .up{color:var(--up)} .down{color:var(--down)}
-.levels{grid-column:2 / -1;display:flex;gap:14px;font-size:13px;color:var(--muted);margin-top:4px}
+.levels{grid-column:2 / -1;display:flex;gap:2px 14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:4px}
 .levels b{color:var(--text);font-weight:500}
-.empty{padding:24px 16px;color:var(--muted)}
+.why{grid-column:2 / -1;font-size:13px;margin-top:4px}
+.why small{display:block;color:var(--muted);font-size:13px}
+.act{grid-row:span 2;align-self:start;justify-self:start;font-size:13px;font-weight:600;border-radius:6px;padding:3px 8px;margin-top:2px}
+.chip{font-size:11px;font-weight:600;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.k-buy,.a-Hold{background:color-mix(in srgb,var(--up) 16%,transparent);color:var(--up)}
+.k-sell,.a-Sell{background:color-mix(in srgb,var(--down) 16%,transparent);color:var(--down)}
+.a-Trim,.a-Watch{background:color-mix(in srgb,var(--gold) 18%,transparent);color:var(--gold)}
+.empty{padding:16px;color:var(--muted)}
+.empty code{color:var(--text)}
 h2{font-size:15px;font-weight:600;margin:26px 0 8px}
 h2 span{color:var(--muted);font-weight:400}
+.sub{margin:-4px 0 8px;color:var(--muted);font-size:13px}
 .more{display:block;margin:12px auto 0;background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:8px 16px;cursor:pointer}
 
 table{width:100%;border-collapse:collapse;font-size:14px}
@@ -96,8 +120,10 @@ td.s{font-weight:700}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .fact{background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .fact h4{margin:0 0 6px;font-size:12px;font-weight:500;color:var(--muted)}
-.fact div{display:flex;justify-content:space-between;font-size:14px}
+.fact div{display:flex;justify-content:space-between;gap:10px;font-size:14px}
 .fact div+div{margin-top:3px}
+.fact p{margin:0;font-size:14px}
+.fact p+p{margin-top:4px}
 .note{color:var(--muted);font-size:12px;margin-top:28px}
 </style>
 </head>
@@ -108,24 +134,39 @@ td.s{font-weight:700}
     <p id="summary"></p>
   </header>
 
+  <button class="market" id="market" aria-label="Market signal, open market chart"></button>
+
   <div class="tabs" role="tablist">
     <button role="tab" aria-selected="true" data-tab="today">Today</button>
     <button role="tab" aria-selected="false" data-tab="all">All stocks</button>
   </div>
 
   <section id="today">
-    <h2>Setups <span id="setupCount"></span></h2>
+    <div id="holdWrap">
+      <h2>Your holdings <span id="holdCount"></span></h2>
+      <div class="list" id="holdings"></div>
+    </div>
+    <h2>Buy signals <span id="buyCount"></span></h2>
+    <p class="sub" id="buySub"></p>
+    <div class="list" id="buys"></div>
+    <h2>Sell signals <span id="sellCount"></span></h2>
+    <p class="sub">Strong names that broke below their 50-day average on heavy volume.</p>
+    <div class="list" id="sells"></div>
+    <h2>Setups to watch <span id="setupCount"></span></h2>
+    <p class="sub">Strong stocks resting on support. They become buy signals if price breaks above the entry.</p>
     <div class="list" id="setups"></div>
     <h2>Strongest names</h2>
     <div class="list" id="strongest"></div>
+    <div id="holdHelp"></div>
   </section>
 
   <section id="all" hidden>
     <div class="tools">
       <input id="q" type="search" placeholder="Search ticker, name or industry" aria-label="Search">
-      <select id="minScore" aria-label="Minimum score">
+      <select id="minScore" aria-label="Filter">
         <option value="0">Any score</option><option value="70">Score 70+</option>
         <option value="80">Score 80+</option><option value="90">Score 90+</option>
+        <option value="sig">Signals today</option>
       </select>
     </div>
     <div class="list tablewrap">
@@ -147,7 +188,7 @@ td.s{font-weight:700}
       <button class="close" id="close">Close</button>
     </div>
     <div class="charts" id="charts">
-      <div class="chartbox"><h4>Daily, 21 EMA and 50 SMA</h4><div class="chart" id="cD"></div></div>
+      <div class="chartbox"><h4 id="cDLabel">Daily, 21 EMA and 50 SMA</h4><div class="chart" id="cD"></div></div>
       <div class="chartbox"><h4>Weekly, 10 SMA</h4><div class="chart" id="cW"></div></div>
     </div>
     <div class="facts" id="facts"></div>
@@ -156,37 +197,85 @@ td.s{font-weight:700}
 
 <script>
 const D = __DATA__;
+const M = D.market;
 const $ = s => document.querySelector(s);
 const pct = (v, d = 0) => v == null ? "–" : (v * 100).toFixed(d) + "%";
 const signed = v => v == null ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
 const money = v => v == null ? "–" : v.toFixed(2);
 const sClass = s => s >= 90 ? "hi" : s >= 80 ? "mid" : "";
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const day = (d, o = {day:"numeric", month:"short"}) => new Date(d + "T12:00:00Z").toLocaleDateString(undefined, o);
 const byT = Object.fromEntries(D.stocks.map(s => [s.t, s]));
+const holdByT = Object.fromEntries(D.holdings.map(h => [h.t, h]));
+const idxName = {SPY: "S&P 500", QQQ: "Nasdaq 100"};
 
-const asof = new Date(D.asof + "T12:00:00Z").toLocaleDateString(undefined, {day:"numeric", month:"short", year:"numeric"});
-const setups = D.stocks.filter(s => s.setup);
-$("#summary").innerHTML = `<strong>${D.stocks.length}</strong> Shariah-compliant stocks ranked from ${D.universe} liquid US stocks. Prices as of ${asof}.`;
-$("#setupCount").textContent = setups.length ? `(${setups.length})` : "";
-const methodText = D.method === "SC" ? "total assets" : "24-month average market cap";
-$("#note").textContent = `Shariah screen: business activity, debt and cash each at most ${pct(D.debtLimit)} of ${methodText}. ` +
-  `Fundamentals are refreshed monthly; verify a stock's status before buying. Personal research tool, not investment advice. Built ${D.built}.`;
+// ---- header and market banner
+const setups = D.stocks.filter(s => s.setup && !s.sig);
+const buys = D.stocks.filter(s => s.sig && s.sig.k === "buy");
+const sells = D.stocks.filter(s => s.sig && s.sig.k === "sell");
+$("#summary").innerHTML = `<strong>${D.stocks.length}</strong> Shariah-compliant stocks ranked from ${D.universe} liquid US stocks. Prices as of ${day(D.asof, {day:"numeric", month:"short", year:"numeric"})}.`;
+const mk = $("#market");
+mk.dataset.state = M.state;
+mk.innerHTML = `<div class="mtop"><span class="mstate">${M.state}</span>
+    <span class="msince">since ${day(M.since)}, ${M.days} trading ${M.days === 1 ? "day" : "days"}</span></div>
+  <p class="madvice">${esc(M.advice)}</p>
+  <div class="mstats">${M.idx.map(i => `<span>${idxName[i.t] || i.t} <b class="${i.vs50 >= 0 ? "up" : "down"}">${signed(i.vs50)}</b> vs 50-day</span>`).join("")}
+    <span>Distribution days <b>${M.dist}</b> of 25</span></div>
+  <span class="mlink">View market chart and signal history</span>`;
 
-function row(s, withLevels) {
-  const lv = withLevels && s.setup ? `<div class="levels">
-      <span>Entry <b>${money(s.setup.entry)}</b></span><span>Stop <b>${money(s.setup.stop)}</b></span>
-      <span>Target <b>${money(s.setup.target)}</b></span><span>Risk <b>${pct(s.setup.risk, 1)}</b></span></div>` : "";
+// ---- lists
+function row(s, extra = "") {
   return `<button class="row" data-t="${esc(s.t)}">
     <span class="score ${sClass(s.score)}">${s.score}</span>
     <span class="tk">${esc(s.t)}</span>
     <span class="px">${money(s.price)}</span>
     <span class="nm">${esc(s.n)}</span>
-    <span class="ch ${s.chg >= 0 ? "up" : "down"}">${signed(s.chg)}</span>${lv}
+    <span class="ch ${s.chg >= 0 ? "up" : "down"}">${signed(s.chg)}</span>${extra}
   </button>`;
 }
-$("#setups").innerHTML = setups.length ? setups.map(s => row(s, true)).join("")
-  : `<div class="empty">No stocks meet the setup rules today. Check the strongest names below, or look again after the next close.</div>`;
-$("#strongest").innerHTML = D.stocks.slice(0, 10).map(s => row(s, false)).join("");
+const levels = x => `<div class="levels">
+  ${x.entry != null ? `<span>Entry <b>${money(x.entry)}</b></span>` : ""}<span>Stop <b>${money(x.stop)}</b></span>
+  <span>Target <b>${money(x.target)}</b></span><span>Risk <b>${pct(x.risk, 1)}</b></span></div>`;
+
+$("#buyCount").textContent = buys.length ? `(${buys.length})` : "";
+$("#sellCount").textContent = sells.length ? `(${sells.length})` : "";
+$("#setupCount").textContent = setups.length ? `(${setups.length})` : "";
+$("#buySub").textContent = {
+  Uptrend: "Breakouts and triggered pullbacks in stocks scoring 80+. The market is in an uptrend, so these are full-size signals.",
+  Caution: "Breakouts and triggered pullbacks in stocks scoring 80+. The market is mixed, so take these at half size.",
+  Downtrend: "Buy signals are switched off while the market is in a downtrend.",
+}[M.state];
+$("#buys").innerHTML = buys.length
+  ? buys.map(s => row(s, `<div class="why">${esc(s.sig.why)}<small>${esc(s.sig.size)}</small></div>${levels(s.sig)}`)).join("")
+  : `<div class="empty">${M.state === "Downtrend" ? "No buys while the market is in a downtrend. Watch the setups below for when it turns." : "No stock gave a buy signal today. Setups below are the ones closest to triggering."}</div>`;
+$("#sells").innerHTML = sells.length
+  ? sells.map(s => row(s, `<div class="why">${esc(s.sig.why)}</div>`)).join("")
+  : `<div class="empty">No strong stock broke down today.</div>`;
+$("#setups").innerHTML = setups.length ? setups.map(s => row(s, levels(s.setup))).join("")
+  : `<div class="empty">No stocks meet the setup rules today. Look again after the next close.</div>`;
+$("#strongest").innerHTML = D.stocks.slice(0, 10).map(s => row(s)).join("");
+
+// ---- holdings
+if (D.holdings.length) {
+  $("#holdCount").textContent = `(${D.holdings.length})`;
+  $("#holdings").innerHTML = D.holdings.map(h => `<button class="row hold" data-t="${esc(h.t)}">
+    <span class="act a-${h.action}">${h.action}</span>
+    <span class="tk">${esc(h.t)}</span>
+    <span class="px">${money(h.price)}</span>
+    <span class="nm">${h.buy ? `Bought at ${money(h.buy)}, <span class="${h.gain >= 0 ? "up" : "down"}">${signed(h.gain)}</span>` : esc(h.n)}</span>
+    <span class="ch ${h.chg == null ? "" : h.chg >= 0 ? "up" : "down"}">${signed(h.chg)}</span>
+    <div class="why">${esc(h.why[0])}${h.why.length > 1 ? `<small>${esc(h.why.slice(1).join(". "))}</small>` : ""}</div>
+  </button>`).join("");
+} else {
+  $("#holdWrap").hidden = true;
+  $("#holdHelp").innerHTML = `<h2>Your holdings</h2><div class="list"><div class="empty">Add the stocks you own to get sell signals here.
+    In your GitHub repo, edit <code>holdings.csv</code> and add a line like <code>AAPL,185.50</code> (ticker and the price you paid).</div></div>`;
+}
+
+const methodText = D.method === "SC" ? "total assets" : "24-month average market cap";
+$("#note").textContent = `Market signal: trend of the S&P 500 and Nasdaq 100 against their 21, 50 and 200-day averages, plus distribution days. ` +
+  `Shariah screen: business activity, debt and cash each at most ${pct(D.debtLimit)} of ${methodText}. ` +
+  `Fundamentals are refreshed monthly; verify a stock's status before buying. Signals are rules, not predictions. Personal research tool, not investment advice. Built ${D.built}.`;
 
 // ---- all stocks table
 const cols = [
@@ -199,9 +288,10 @@ function renderHead() {
     `<th class="${cls || ""}" ${k === sortKey ? `aria-sort="${sortDir < 0 ? "descending" : "ascending"}"` : ""}>
       <button data-k="${k}">${label}${k === sortKey ? (sortDir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("");
 }
+const chip = s => s.sig ? `<span class="chip k-${s.sig.k}">${s.sig.k === "buy" ? "Buy" : "Sell"}</span>` : "";
 function renderTable() {
-  const q = $("#q").value.trim().toLowerCase(), min = +$("#minScore").value;
-  let rows = D.stocks.filter(s => s.score >= min &&
+  const q = $("#q").value.trim().toLowerCase(), f = $("#minScore").value, min = f === "sig" ? 0 : +f;
+  let rows = D.stocks.filter(s => s.score >= min && (f !== "sig" || s.sig) &&
     (!q || s.t.toLowerCase().includes(q) || (s.n || "").toLowerCase().includes(q) || (s.ind || "").toLowerCase().includes(q)));
   rows.sort((a, b) => {
     const x = a[sortKey], y = b[sortKey];
@@ -210,10 +300,10 @@ function renderTable() {
   });
   $("#more").hidden = rows.length <= shown;
   $("#tbody").innerHTML = rows.slice(0, shown).map(s => `<tr data-t="${esc(s.t)}" tabindex="0">
-    <td><span class="tk">${esc(s.t)}</span></td><td class="s">${s.score}</td><td>${s.rs}</td><td>${s.eps}</td>
+    <td><span class="tk">${esc(s.t)}</span>${chip(s)}</td><td class="s">${s.score}</td><td>${s.rs}</td><td>${s.eps}</td>
     <td class="opt">${s.sales}</td><td class="opt">${s.grp}</td><td class="opt">${pct(s.off)}</td>
     <td>${money(s.price)}</td><td class="${s.chg >= 0 ? "up" : "down"}">${signed(s.chg)}</td></tr>`).join("") ||
-    `<tr><td colspan="9" class="empty" style="text-align:left">No stocks match. Clear the search or lower the minimum score.</td></tr>`;
+    `<tr><td colspan="9" class="empty" style="text-align:left">No stocks match. Clear the search or change the filter.</td></tr>`;
 }
 $("#thead").addEventListener("click", e => {
   const k = e.target.closest("button")?.dataset.k; if (!k) return;
@@ -234,17 +324,27 @@ let charts = [];
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function ema(d, n) { const k = 2 / (n + 1); let e; return d.map((b, i) => { e = i ? b.close * k + e * (1 - k) : b.close; return { time: b.time, value: e }; }).slice(n); }
 function sma(d, n) { const o = []; let s = 0; d.forEach((b, i) => { s += b.close; if (i >= n) s -= d[i - n].close; if (i >= n - 1) o.push({ time: b.time, value: s / n }); }); return o; }
+function weekKey(date) { const t = new Date(date + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); }
 function weekly(d) {
   const m = new Map();
   d.forEach(b => {
-    const t = new Date(b.time + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
-    const k = t.toISOString().slice(0, 10), w = m.get(k);
+    const k = weekKey(b.time), w = m.get(k);
     if (!w) m.set(k, { time: k, open: b.open, high: b.high, low: b.low, close: b.close });
     else { w.high = Math.max(w.high, b.high); w.low = Math.min(w.low, b.low); w.close = b.close; }
   });
   return [...m.values()];
 }
-function makeChart(el, data, lines, s, bars) {
+function toMarkers(list, weeklyMode) {
+  const style = { B: ["belowBar", "--up", "arrowUp"], S: ["aboveBar", "--down", "arrowDown"], C: ["aboveBar", "--gold", "circle"] };
+  const seen = new Map();
+  list.forEach(([date, code, text]) => {
+    const [position, color, shape] = style[code];
+    const time = weeklyMode ? weekKey(date) : date;
+    seen.set(time + code, { time, position, color: cssVar(color), shape, text: "" });
+  });
+  return [...seen.values()].sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
+}
+function makeChart(el, data, lines, priceLines, markers, bars) {
   const c = LightweightCharts.createChart(el, {
     autoSize: true,
     layout: { background: { color: "transparent" }, textColor: cssVar("--muted"), fontFamily: "Instrument Sans, system-ui, sans-serif" },
@@ -256,39 +356,76 @@ function makeChart(el, data, lines, s, bars) {
   const cs = c.addCandlestickSeries({ upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn, borderVisible: false });
   cs.setData(data);
   lines.forEach(([pts, color]) => c.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }).setData(pts));
-  if (s.setup) [["Entry", s.setup.entry, cssVar("--gold")], ["Stop", s.setup.stop, dn], ["Target", s.setup.target, up]]
-    .forEach(([title, price, color]) => cs.createPriceLine({ price, color, title, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
+  priceLines.forEach(([title, price, color]) => price != null && cs.createPriceLine({ price, color: cssVar(color), title, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
+  const first = data[Math.max(0, data.length - bars)]?.time;
+  cs.setMarkers(markers.filter(m => m.time >= first));
   c.timeScale().setVisibleLogicalRange({ from: data.length - bars, to: data.length + 2 });
   charts.push(c);
 }
 function fact(title, pairs) {
   return `<div class="fact"><h4>${title}</h4>${pairs.map(([a, b]) => `<div><span>${a}</span><span>${b}</span></div>`).join("")}</div>`;
 }
-async function openStock(t) {
-  const s = byT[t]; if (!s) return;
-  $("#sTitle").textContent = `${s.t}  ${money(s.price)}`;
-  $("#sSub").textContent = [s.n, s.ind].filter(Boolean).join(", ");
-  const checked = s.checked ? new Date(s.checked + "T12:00:00Z").toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "–";
-  $("#facts").innerHTML =
-    (s.setup ? fact("Setup", [["Entry", money(s.setup.entry)], ["Stop", money(s.setup.stop)], ["Target", money(s.setup.target)], ["Risk", pct(s.setup.risk, 1)]]) : "") +
-    fact(`Score ${s.score}`, [["Relative strength", s.rs], ["EPS growth", s.eps], ["Sales growth", s.sales], ["Volume", s.vol], ["Near 52w high", s.hi], ["Group strength", s.grp]]) +
-    fact("Fundamentals", [["EPS growth (q/q yoy)", signed(s.epsg)], ["Sales growth", signed(s.salesg)], ["P/E", s.pe ?? "–"], ["Off 52w high", pct(s.off, 1)]]) +
-    fact("Shariah", [["Debt ratio", pct(s.debt, 1)], ["Cash ratio", pct(s.cash, 1)], ["Last checked", checked]]);
+function textFact(title, lines) {
+  return `<div class="fact"><h4>${title}</h4>${lines.map(l => `<p>${esc(l)}</p>`).join("")}</div>`;
+}
+function showSheet() {
   charts.forEach(c => c.remove()); charts = [];
   $("#sheet").classList.add("open"); $("#sheet").setAttribute("aria-hidden", "false"); $("#close").focus();
+}
+async function drawCharts(file, priceLines) {
   const box = $("#charts");
-  if (!s.chart || !window.LightweightCharts) { box.hidden = true; return; }
+  if (!window.LightweightCharts) { box.hidden = true; return; }
   box.hidden = false; $("#cD").innerHTML = '<div class="empty">Loading chart…</div>'; $("#cW").innerHTML = "";
   try {
-    const raw = await (await fetch(`data/${encodeURIComponent(s.t)}.json`)).json();
-    const d = raw.map(b => ({ time: b[0], open: b[1], high: b[2], low: b[3], close: b[4] }));
-    const w = weekly(d);
+    const raw = await (await fetch(`data/${encodeURIComponent(file)}.json`)).json();
+    const d = raw.b.map(b => ({ time: b[0], open: b[1], high: b[2], low: b[3], close: b[4] }));
+    const w = weekly(d), narrow = innerWidth < 640;
     $("#cD").innerHTML = "";
-    makeChart($("#cD"), d, [[ema(d, 21), cssVar("--gold")], [sma(d, 50), cssVar("--muted")]], s, innerWidth < 640 ? 80 : 130);
-    makeChart($("#cW"), w, [[sma(w, 10), cssVar("--gold")]], s, innerWidth < 640 ? 45 : 60);
+    makeChart($("#cD"), d, [[ema(d, 21), cssVar("--gold")], [sma(d, 50), cssVar("--muted")]], priceLines, toMarkers(raw.m, false), narrow ? 80 : 130);
+    makeChart($("#cW"), w, [[sma(w, 10), cssVar("--gold")]], priceLines, toMarkers(raw.m, true), narrow ? 45 : 60);
   } catch (e) { $("#cD").innerHTML = '<div class="empty">Chart data could not be loaded. Refresh the page and try again.</div>'; }
 }
+function openMarket() {
+  showSheet();
+  $("#sTitle").textContent = `Market: ${M.state}`;
+  $("#sSub").textContent = `S&P 500 (SPY). Green arrows mark a new uptrend, red arrows a downtrend, gold dots a turn to caution.`;
+  $("#cDLabel").textContent = "S&P 500 daily, 21 EMA and 50 SMA";
+  $("#facts").innerHTML = textFact("What to do", [M.advice]) +
+    M.idx.map(i => fact(idxName[i.t] || i.t, [["Price", money(i.price)], ["Day", signed(i.chg)], ["vs 50-day", signed(i.vs50)], ["vs 200-day", signed(i.vs200)]])).join("") +
+    fact("Signal strength", [["Trend points", `${M.points} of 8`], ["Distribution days", `${M.dist} of 25 sessions`], ["In this state since", day(M.since)]]);
+  drawCharts("_market", []);
+}
+function openStock(t) {
+  const s = byT[t], h = holdByT[t], b = s || h;
+  if (!b) return;
+  showSheet();
+  $("#cDLabel").textContent = "Daily, 21 EMA and 50 SMA. Green arrows are buy signals, red arrows sell signals";
+  $("#sTitle").textContent = `${b.t}  ${money(b.price)}`;
+  $("#sSub").textContent = [b.n, s?.ind].filter(Boolean).join(", ");
+  let html = "";
+  if (h) html += textFact(`Your position: ${h.action}`, h.why) +
+    fact("Position", [["Bought at", money(h.buy)], ["Gain", signed(h.gain)], ["Suggested stop", money(h.stop)],
+      ["Shariah", h.halal == null ? "Not checked" : h.halal ? "Passes" : "Fails"]]);
+  if (s?.sig) html += s.sig.k === "buy"
+    ? fact("Buy signal today", [["Entry", money(s.sig.entry)], ["Stop", money(s.sig.stop)], ["Target", money(s.sig.target)], ["Risk", pct(s.sig.risk, 1)]]) + textFact("Why", [s.sig.why, s.sig.size])
+    : textFact("Sell signal today", [s.sig.why]);
+  if (s?.setup && !s.sig) html += fact("Setup", [["Entry", money(s.setup.entry)], ["Stop", money(s.setup.stop)], ["Target", money(s.setup.target)], ["Risk", pct(s.setup.risk, 1)]]);
+  if (s) {
+    const checked = s.checked ? day(s.checked, { month: "short", year: "numeric" }) : "–";
+    html += fact(`Score ${s.score}`, [["Relative strength", s.rs], ["EPS growth", s.eps], ["Sales growth", s.sales], ["Volume", s.vol], ["Near 52w high", s.hi], ["Group strength", s.grp]]) +
+      fact("Fundamentals", [["EPS growth (q/q yoy)", signed(s.epsg)], ["Sales growth", signed(s.salesg)], ["P/E", s.pe ?? "–"], ["Off 52w high", pct(s.off, 1)]]) +
+      fact("Shariah", [["Debt ratio", pct(s.debt, 1)], ["Cash ratio", pct(s.cash, 1)], ["Last checked", checked]]);
+  }
+  $("#facts").innerHTML = html;
+  const lv = s?.sig?.k === "buy" ? s.sig : s?.setup;
+  const lines = [];
+  if (lv) lines.push(["Entry", lv.entry, "--gold"], ["Stop", lv.stop, "--down"], ["Target", lv.target, "--up"]);
+  if (h) lines.push(["Bought", h.buy, "--muted"], ["Stop", lv ? null : h.stop, "--down"]);
+  if (!b.chart) { $("#charts").hidden = true; return; }
+  drawCharts(b.t, lines);
+}
 function closeSheet() { $("#sheet").classList.remove("open"); $("#sheet").setAttribute("aria-hidden", "true"); charts.forEach(c => c.remove()); charts = []; }
+mk.addEventListener("click", openMarket);
 document.addEventListener("click", e => { const el = e.target.closest("[data-t]"); if (el) openStock(el.dataset.t); });
 $("#tbody").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.dataset.t) openStock(e.target.dataset.t); });
 $("#close").addEventListener("click", closeSheet);

@@ -66,6 +66,20 @@ SETUP_MIN_SCORE = 80
 SETUP_MAX_RISK = 0.08        # skip setups where the stop is more than 8% away
 SETUP_TARGET_R = 2.5         # target = entry + 2.5 x risk
 
+# Market signal (built from the S&P 500 and Nasdaq 100 ETFs)
+MARKET_TICKERS = ["SPY", "QQQ"]
+DIST_DAY_LIMIT = 6           # this many distribution days in 25 sessions weakens the market
+
+# Stock signals
+BREAKOUT_VOL = 1.4           # breakout volume must be 1.4x the 50-day average
+BREAKDOWN_VOL = 1.2          # breakdown volume must be 1.2x the 50-day average
+SELL_SIGNAL_MIN_SCORE = 70   # only flag breakdowns in names strong enough to be on your radar
+
+# Your holdings (sell signals). List them in holdings.csv, or in a GitHub secret named
+# HOLDINGS written like  AAPL@185.50, MSFT@410
+STOP_LOSS = 0.08             # sell if price falls 8% below your buy price
+PROFIT_TAKE = 0.25           # suggest taking some profit at +25%
+
 # Fundamentals refresh
 FUND_REFRESH_DAYS = 30
 MAX_FUND_FETCH_PER_RUN = 600
@@ -78,6 +92,7 @@ ROOT = Path(__file__).parent
 CACHE_FILE = ROOT / "cache" / "fundamentals.json"
 SITE = ROOT / "site"
 TEMPLATE = ROOT / "template.html"
+HOLDINGS_FILE = ROOT / "holdings.csv"
 LIMIT = int(os.environ.get("LIMIT", "0"))
 
 UA = {"User-Agent": "Mozilla/5.0 (personal screener)"}
@@ -111,7 +126,7 @@ def get_universe():
 
 # ------------------------------------------------------------------ prices --
 
-def download_prices(tickers, chunk=200):
+def download_prices(tickers, chunk=200, min_len=260):
     out = {}
     for i in range(0, len(tickers), chunk):
         part = tickers[i:i + chunk]
@@ -132,7 +147,7 @@ def download_prices(tickers, chunk=200):
             else:
                 d = df
             d = d[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
-            if len(d) >= 260:
+            if len(d) >= min_len:
                 out[t] = d
         time.sleep(1)
     return out
@@ -322,6 +337,192 @@ def find_setup(d, sc):
     }
 
 
+# ----------------------------------------------------------------- signals --
+
+def averages(d):
+    c = d["Close"]
+    return c.ewm(span=21, adjust=False).mean(), c.rolling(50).mean(), c.rolling(200).mean()
+
+
+def market_regime(idx):
+    """Daily market state from SPY and QQQ trend, plus distribution days on SPY.
+
+    Each index earns up to 4 points: close above its 21 EMA, above its 50 SMA,
+    50 SMA rising, close above its 200 SMA. Too many distribution days costs 2 points.
+    Uptrend at 6+ of 8, Downtrend at 2 or less, with some hysteresis so it doesn't flicker.
+    """
+    spy = idx["SPY"]
+    pts = pd.Series(0.0, index=spy.index)
+    used = [idx[t] for t in MARKET_TICKERS if t in idx]
+    for d in used:
+        c = d["Close"]
+        e21, s50, s200 = averages(d)
+        p = (c > e21).astype(int) + (c > s50).astype(int) + (s50 > s50.shift(10)).astype(int) \
+            + (c > s200).astype(int)
+        pts = pts.add(p.reindex(spy.index).ffill().fillna(0), fill_value=0)
+    pts = pts * (2 / len(used))
+    c, v = spy["Close"], spy["Volume"]
+    dist = ((c.pct_change() <= -0.002) & (v > v.shift(1))).astype(int).rolling(25).sum().fillna(0)
+    pts = pts - (dist >= DIST_DAY_LIMIT) * 2
+
+    states, st = [], "Caution"
+    for i, p in enumerate(pts.values):
+        if i < 200:
+            states.append(None)
+            continue
+        if p >= 6:
+            st = "Uptrend"
+        elif p <= 2:
+            st = "Downtrend"
+        elif st == "Uptrend" and p <= 4:
+            st = "Caution"
+        elif st == "Downtrend" and p >= 5:
+            st = "Caution"
+        states.append(st)
+    return pd.Series(states, index=spy.index), pts, dist
+
+
+ADVICE = {
+    "Uptrend": "Buy signals are active. Take them at full size and keep normal stops.",
+    "Caution": "Mixed market. Take only the strongest buy signals at half size, and tighten stops.",
+    "Downtrend": "Avoid new buys. Protect gains, act on sell signals and hold more cash.",
+}
+
+
+def market_markers(regime):
+    prev = regime.shift(1)
+    out = []
+    for t, st in regime.items():
+        p = prev.get(t)
+        if not isinstance(st, str) or not isinstance(p, str) or st == p:
+            continue
+        code = {"Uptrend": "B", "Downtrend": "S", "Caution": "C"}[st]
+        out.append([t.strftime("%Y-%m-%d"), code, st])
+    return out
+
+
+def market_summary(idx, regime, pts, dist):
+    reg = regime.dropna()
+    state = reg.iloc[-1]
+    changed = reg[reg != reg.shift(1)]
+    since = changed.index[-1]
+    info = {"state": state, "since": since.strftime("%Y-%m-%d"),
+            "days": int((reg.index > since).sum()) + 1,
+            "points": round(float(pts.iloc[-1]), 1), "dist": int(dist.iloc[-1]),
+            "distLimit": DIST_DAY_LIMIT, "advice": ADVICE[state], "idx": []}
+    for t in MARKET_TICKERS:
+        if t not in idx:
+            continue
+        d = idx[t]
+        c = d["Close"]
+        e21, s50, s200 = averages(d)
+        info["idx"].append({"t": t, "price": round(float(c.iloc[-1]), 2),
+                            "chg": clean(c.iloc[-1] / c.iloc[-2] - 1),
+                            "vs50": clean(c.iloc[-1] / s50.iloc[-1] - 1),
+                            "vs200": clean(c.iloc[-1] / s200.iloc[-1] - 1)})
+    return info
+
+
+def signal_series(d, regime):
+    """Breakouts (buy) and 50-day breakdowns (sell) for every day in the history."""
+    c, h, v = d["Close"], d["High"], d["Volume"]
+    e21, s50, s200 = averages(d)
+    av50 = v.rolling(50).mean().shift(1)
+    pivot = h.shift(1).rolling(50).max()
+    reg = regime.reindex(d.index).ffill()
+    buy = (c > pivot) & (v > BREAKOUT_VOL * av50) & (c > s50) & (s50 > s50.shift(10)) \
+        & (reg != "Downtrend")
+    sell = (c < s50) & (c.shift(1) >= s50.shift(1)) & (v > BREAKDOWN_VOL * av50)
+    return buy.fillna(False), sell.fillna(False)
+
+
+def today_signal(d, sc, buy, sell, state):
+    c, low, v = d["Close"], d["Low"], d["Volume"]
+    av = v.rolling(50).mean().iloc[-2]
+    vr = float(v.iloc[-1] / av) if av else 0.0
+    if sell.iloc[-1] and sc >= SELL_SIGNAL_MIN_SCORE:
+        return {"k": "sell", "why": f"Closed below its 50-day average on {vr:.1f}x normal volume"}
+    if state == "Downtrend" or sc < SETUP_MIN_SCORE:
+        return None
+    size = "Full size" if state == "Uptrend" else "Half size, market in caution"
+    last = float(c.iloc[-1])
+    if buy.iloc[-1]:
+        stop = max(float(low.iloc[-5:].min()) * 0.99, last * (1 - STOP_LOSS))
+        why = f"Broke out to a 50-day high on {vr:.1f}x normal volume"
+    else:
+        prev = find_setup(d.iloc[:-1], sc)
+        if not (prev and d["High"].iloc[-1] >= prev["entry"] and last >= prev["entry"] * 0.995):
+            return None
+        stop = prev["stop"]
+        why = f"Pullback setup triggered above {prev['entry']:.2f}"
+    risk = last - stop
+    if risk <= 0 or risk / last > SETUP_MAX_RISK + 0.01:
+        return None
+    return {"k": "buy", "why": why, "size": size, "entry": round(last, 2), "stop": round(stop, 2),
+            "target": round(last + SETUP_TARGET_R * risk, 2), "risk": round(risk / last, 4)}
+
+
+def load_holdings():
+    found = {}
+    if HOLDINGS_FILE.exists():
+        h = pd.read_csv(HOLDINGS_FILE, comment="#", skipinitialspace=True)
+        h.columns = [str(c).strip().lower() for c in h.columns]
+        for _, r in h.iterrows():
+            t = str(r.get("ticker", "")).strip().upper().replace(".", "-")
+            if t and t != "NAN":
+                bp = pd.to_numeric(r.get("buy_price"), errors="coerce")
+                found[t] = None if pd.isna(bp) else float(bp)
+    for part in os.environ.get("HOLDINGS", "").replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        t, _, bp = part.partition("@")
+        t = t.strip().upper().replace(".", "-")
+        try:
+            found[t] = float(bp) if bp.strip() else None
+        except ValueError:
+            found[t] = None
+    return found
+
+
+def holding_signal(t, d, buy_price, state, shariah, buy, sell, name):
+    c, low = d["Close"], d["Low"]
+    e21, s50, s200 = averages(d)
+    last = float(c.iloc[-1])
+    gain = last / buy_price - 1 if buy_price else None
+    reasons = []    # (severity, action, text)
+    if shariah is not None and not shariah[0]:
+        reasons.append((4, "Sell", f"No longer passes the Shariah screen ({shariah[1].lower()})"))
+    if gain is not None and gain <= -STOP_LOSS:
+        reasons.append((4, "Sell", f"Down {abs(gain):.0%} from your buy price, past the {STOP_LOSS:.0%} stop"))
+    if sell.iloc[-1]:
+        reasons.append((4, "Sell", "Broke below its 50-day average on heavy volume"))
+    elif len(s50.dropna()) and last < s50.iloc[-1]:
+        reasons.append((3, "Sell", "Trading below its 50-day average"))
+    if gain is not None and gain >= PROFIT_TAKE:
+        reasons.append((2, "Trim", f"Up {gain:.0%}; consider selling part to lock in profit"))
+    if last < e21.iloc[-1] and not (len(s50.dropna()) and last < s50.iloc[-1]):
+        reasons.append((1, "Watch", "Slipped below its 21-day average; tighten your stop"))
+    if state == "Downtrend":
+        reasons.append((2, "Trim", "Market in downtrend; consider reducing your position"))
+    elif state == "Caution":
+        reasons.append((1, "Watch", "Market in caution; keep stops tight"))
+    if buy.iloc[-1]:
+        reasons.append((0, "Hold", "Broke out to a new high today"))
+    if shariah is None:
+        reasons.append((1, "Watch", "Shariah status not checked yet; verify on Musaffa or Zoya"))
+    reasons.sort(key=lambda r: -r[0])
+    action = reasons[0][1] if reasons and reasons[0][0] > 0 else "Hold"
+    if not reasons or reasons[0][0] == 0:
+        reasons.append((0, "Hold", "Holding above its rising averages"))
+    stop = max([x for x in [buy_price * (1 - STOP_LOSS) if buy_price else None,
+                            float(s50.iloc[-1]) * 0.99 if len(s50.dropna()) else None] if x])
+    return {"t": t, "n": name or t, "price": round(last, 2), "chg": clean(c.iloc[-1] / c.iloc[-2] - 1),
+            "buy": buy_price, "gain": clean(gain), "action": action,
+            "why": [r[2] for r in reasons], "stop": round(stop, 2),
+            "halal": None if shariah is None else bool(shariah[0])}
+
+
 # ------------------------------------------------------------------- output --
 
 def clean(v, nd=4):
@@ -334,16 +535,30 @@ def clean(v, nd=4):
     return v
 
 
-def write_chart(t, d):
+def write_chart(t, d, buy=None, sell=None, markers=None):
     d = d.iloc[-300:]
     bars = [[i.strftime("%Y-%m-%d"), round(float(r.Open), 2), round(float(r.High), 2),
              round(float(r.Low), 2), round(float(r.Close), 2), int(r.Volume)]
             for i, r in d.iterrows()]
-    (SITE / "data" / f"{t}.json").write_text(json.dumps(bars, separators=(",", ":")))
+    m = list(markers or [])
+    if buy is not None:
+        first = buy & (buy.shift(1).rolling(10).sum().fillna(0) == 0)   # first buy in 10 days
+        m += [[i.strftime("%Y-%m-%d"), "B", "Buy"] for i in first[first].index if i >= d.index[0]]
+        m += [[i.strftime("%Y-%m-%d"), "S", "Sell"] for i in sell[sell].index if i >= d.index[0]]
+    m = sorted(x for x in m if x[0] >= bars[0][0])
+    (SITE / "data" / f"{t}.json").write_text(json.dumps({"b": bars, "m": m}, separators=(",", ":")))
 
 
 def main():
     (SITE / "data").mkdir(parents=True, exist_ok=True)
+
+    idx = download_prices(MARKET_TICKERS)
+    if "SPY" not in idx:
+        raise SystemExit("Could not download SPY prices, so the market signal can't be built.")
+    regime, mpts, mdist = market_regime(idx)
+    market = market_summary(idx, regime, mpts, mdist)
+    write_chart("_market", idx["SPY"], markers=market_markers(regime))
+    log(f"market: {market['state']} since {market['since']}")
 
     universe = get_universe()
     if LIMIT:
@@ -354,8 +569,13 @@ def main():
     liquid = {t: d for t, d in prices.items() if is_liquid(d)}
     log(f"liquid with 1y+ history: {len(liquid)}")
 
+    holdings = load_holdings()
+    missing = [t for t in holdings if t not in prices]
+    if missing:
+        prices.update(download_prices(missing, min_len=60))
+
     cache = load_cache()
-    refresh_fundamentals(list(liquid), cache)
+    refresh_fundamentals(list(liquid) + [t for t in holdings if t in prices and t not in liquid], cache)
 
     rows = []
     for t, d in liquid.items():
@@ -375,10 +595,13 @@ def main():
 
     stocks = []
     for t, r in halal.iterrows():
-        setup = find_setup(liquid[t], r["score"])
-        has_chart = bool(setup) or r["score"] >= CHART_MIN_SCORE
+        d = liquid[t]
+        setup = find_setup(d, r["score"])
+        buy, sell = signal_series(d, regime)
+        sig = today_signal(d, r["score"], buy, sell, market["state"])
+        has_chart = bool(setup) or bool(sig) or r["score"] >= CHART_MIN_SCORE
         if has_chart:
-            write_chart(t, liquid[t])
+            write_chart(t, d, buy, sell)
         stocks.append({
             "t": t, "n": val(r, "name") or t, "sec": val(r, "sector"), "ind": val(r, "industry"),
             "score": int(r["score"]), "rs": int(r["r_rs"]), "eps": int(r["r_eps"]),
@@ -388,21 +611,50 @@ def main():
             "off": clean(r["off_high"] - 1), "pe": clean(r["pe"], 1),
             "epsg": clean(r["eps_growth"]), "salesg": clean(r["sales_growth"]),
             "debt": clean(r["debt_ratio"]), "cash": clean(r["cash_ratio"]),
-            "checked": val(r, "checked"), "chart": has_chart, "setup": setup,
+            "checked": val(r, "checked"), "chart": has_chart, "setup": setup, "sig": sig,
         })
+
+    held = []
+    for t, bp in holdings.items():
+        if t not in prices:
+            held.append({"t": t, "n": t, "action": "Watch", "chart": False,
+                         "why": ["No price data found for this ticker; check the spelling"]})
+            continue
+        d = prices[t]
+        if t in df.index:
+            r = df.loc[t]
+            shariah = (bool(r["halal"]), r["fail_reason"] or "") if val(r, "checked") else None
+        else:
+            row = pd.Series({"avg_close_2y": float(d["Close"].mean()), **cache.get(t, {})}, name=t)
+            ok, reason, _, _ = shariah_check(row)
+            shariah = (ok, reason) if val(row, "checked") else None
+        buy, sell = signal_series(d, regime)
+        name = cache.get(t, {}).get("name")
+        h = holding_signal(t, d, bp, market["state"], shariah, buy, sell, name)
+        mk = [[d.index[-1].strftime("%Y-%m-%d"), "S" if h["action"] == "Sell" else "C", h["action"]]] \
+            if h["action"] in ("Sell", "Trim") else []
+        write_chart(t, d, buy, sell, mk)
+        h["chart"] = True
+        held.append(h)
+    order = {"Sell": 0, "Trim": 1, "Watch": 2, "Hold": 3}
+    held.sort(key=lambda h: order[h["action"]])
 
     last_bar = max(d.index[-1] for d in liquid.values()).strftime("%Y-%m-%d")
     payload = {
         "asof": last_bar,
         "built": dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "method": SHARIAH_METHOD, "debtLimit": DEBT_LIMIT, "cashLimit": CASH_LIMIT,
-        "universe": len(df), "stocks": stocks,
+        "universe": len(df), "stocks": stocks, "market": market, "holdings": held,
+        "stopLoss": STOP_LOSS,
     }
     data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
     (SITE / "index.html").write_text(TEMPLATE.read_text().replace("__DATA__", data))
     halal.to_csv(SITE / "screen.csv")
     n_setups = sum(1 for s in stocks if s["setup"])
-    log(f"done: {len(stocks)} halal stocks, {n_setups} setups -> site/index.html")
+    n_buy = sum(1 for s in stocks if s["sig"] and s["sig"]["k"] == "buy")
+    n_sell = sum(1 for s in stocks if s["sig"] and s["sig"]["k"] == "sell")
+    log(f"done: {len(stocks)} halal stocks, {n_setups} setups, {n_buy} buy and {n_sell} sell "
+        f"signals, {len(held)} holdings -> site/index.html")
 
 
 if __name__ == "__main__":
