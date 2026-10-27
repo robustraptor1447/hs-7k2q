@@ -25,6 +25,7 @@
   }
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.45 "Instrument Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;
@@ -117,6 +118,14 @@ td.s{font-weight:700}
 .chartbox{background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:8px}
 .chartbox h4{margin:2px 4px 6px;font-size:12px;font-weight:500;color:var(--muted)}
 .chart{height:280px}
+.tabs.seg{margin:14px 0 0}
+.livebox{margin:10px 0 14px}
+.live{height:440px;background:var(--raise);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+@media (max-width:640px){ .live{height:380px} }
+.livenote{margin:6px 2px 0;color:var(--muted);font-size:12px}
+.livenote a{color:var(--focus)}
+.tradingview-widget-copyright{margin:4px 8px;height:20px}
+.stale{color:var(--down)}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .fact{background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .fact h4{margin:0 0 6px;font-size:12px;font-weight:500;color:var(--muted)}
@@ -187,6 +196,14 @@ td.s{font-weight:700}
       <div><h3 id="sTitle"></h3><p id="sSub"></p></div>
       <button class="close" id="close">Close</button>
     </div>
+    <div class="tabs seg" role="tablist" id="view">
+      <button role="tab" data-v="live">Live chart</button>
+      <button role="tab" data-v="sig">Signals and levels</button>
+    </div>
+    <div class="livebox" id="liveWrap" hidden>
+      <div class="live" id="liveBox"></div>
+      <p class="livenote">Live prices from TradingView. US market hours are 9:30 pm to 4 am Malaysia time (10:30 pm to 5 am from November to mid-March). Pick 5m, 1h or 1D at the top of the chart.</p>
+    </div>
     <div class="charts" id="charts">
       <div class="chartbox"><h4 id="cDLabel">Daily, 21 EMA and 50 SMA</h4><div class="chart" id="cD"></div></div>
       <div class="chartbox"><h4>Weekly, 10 SMA</h4><div class="chart" id="cW"></div></div>
@@ -213,7 +230,10 @@ const idxName = {SPY: "S&P 500", QQQ: "Nasdaq 100"};
 const setups = D.stocks.filter(s => s.setup && !s.sig);
 const buys = D.stocks.filter(s => s.sig && s.sig.k === "buy");
 const sells = D.stocks.filter(s => s.sig && s.sig.k === "sell");
-$("#summary").innerHTML = `<strong>${D.stocks.length}</strong> Shariah-compliant stocks ranked from ${D.universe} liquid US stocks. Prices as of ${day(D.asof, {day:"numeric", month:"short", year:"numeric"})}.`;
+const ageDays = (Date.now() - new Date(D.asof + "T21:00:00Z")) / 864e5;
+$("#summary").innerHTML = `<strong>${D.stocks.length}</strong> Shariah-compliant stocks ranked from ${D.universe} liquid US stocks. ` +
+  `Rankings and signals use the US close of ${day(D.asof, {weekday:"short", day:"numeric", month:"short"})} and update every weekday at 6:30 am Malaysia time. Open any stock for a live chart.` +
+  (ageDays > 4 ? ` <span class="stale">This looks out of date. Check the Actions tab in your GitHub repo for a failed run.</span>` : "");
 const mk = $("#market");
 mk.dataset.state = M.state;
 mk.innerHTML = `<div class="mtop"><span class="mstate">${M.state}</span>
@@ -368,6 +388,42 @@ function fact(title, pairs) {
 function textFact(title, lines) {
   return `<div class="fact"><h4>${title}</h4>${lines.map(l => `<p>${esc(l)}</p>`).join("")}</div>`;
 }
+// ---- live chart (TradingView) and the view toggle
+let view = "live", ctx = null;
+try { view = localStorage.getItem("chartView") || "live"; } catch (e) {}
+function liveChart(sym) {
+  const box = $("#liveBox"); box.innerHTML = "";
+  const c = document.createElement("div"); c.className = "tradingview-widget-container"; c.style.height = "100%";
+  const w = document.createElement("div"); w.className = "tradingview-widget-container__widget"; w.style.height = "calc(100% - 24px)";
+  const cr = document.createElement("div"); cr.className = "tradingview-widget-copyright livenote";
+  cr.innerHTML = `<a href="https://www.tradingview.com/symbols/${encodeURIComponent(sym)}/" rel="noopener nofollow" target="_blank">${esc(sym)} chart</a> by TradingView`;
+  const sc = document.createElement("script");
+  sc.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"; sc.async = true;
+  sc.textContent = JSON.stringify({
+    autosize: true, symbol: sym, interval: "D", timezone: "Asia/Kuala_Lumpur",
+    theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+    style: "1", locale: "en", allow_symbol_change: false, hide_side_toolbar: true, withdateranges: true,
+    save_image: false, calendar: false, support_host: "https://www.tradingview.com",
+  });
+  sc.onerror = () => { box.innerHTML = '<div class="empty">The live chart could not load. Check your connection, or switch to Signals and levels.</div>'; };
+  c.append(w, cr, sc); box.append(c);
+}
+function renderView() {
+  if (!ctx) return;
+  document.querySelectorAll("#view button").forEach(b => b.setAttribute("aria-selected", b.dataset.v === view));
+  charts.forEach(c => c.remove()); charts = [];
+  const live = view === "live";
+  $("#liveWrap").hidden = !live;
+  if (live) { $("#charts").hidden = true; liveChart(ctx.sym); return; }
+  $("#liveBox").innerHTML = "";
+  if (!ctx.file) { $("#charts").hidden = false; $("#cW").innerHTML = ""; $("#cD").innerHTML = '<div class="empty">No signal chart for this stock yet. It appears once the stock scores 70 or more.</div>'; return; }
+  drawCharts(ctx.file, ctx.lines);
+}
+$("#view").addEventListener("click", e => {
+  const v = e.target.closest("button")?.dataset.v; if (!v) return;
+  view = v; try { localStorage.setItem("chartView", v); } catch (err) {}
+  renderView();
+});
 function showSheet() {
   charts.forEach(c => c.remove()); charts = [];
   $("#sheet").classList.add("open"); $("#sheet").setAttribute("aria-hidden", "false"); $("#close").focus();
@@ -393,7 +449,7 @@ function openMarket() {
   $("#facts").innerHTML = textFact("What to do", [M.advice]) +
     M.idx.map(i => fact(idxName[i.t] || i.t, [["Price", money(i.price)], ["Day", signed(i.chg)], ["vs 50-day", signed(i.vs50)], ["vs 200-day", signed(i.vs200)]])).join("") +
     fact("Signal strength", [["Trend points", `${M.points} of 8`], ["Distribution days", `${M.dist} of 25 sessions`], ["In this state since", day(M.since)]]);
-  drawCharts("_market", []);
+  ctx = { sym: "SPY", file: "_market", lines: [] }; renderView();
 }
 function openStock(t) {
   const s = byT[t], h = holdByT[t], b = s || h;
@@ -421,10 +477,9 @@ function openStock(t) {
   const lines = [];
   if (lv) lines.push(["Entry", lv.entry, "--gold"], ["Stop", lv.stop, "--down"], ["Target", lv.target, "--up"]);
   if (h) lines.push(["Bought", h.buy, "--muted"], ["Stop", lv ? null : h.stop, "--down"]);
-  if (!b.chart) { $("#charts").hidden = true; return; }
-  drawCharts(b.t, lines);
+  ctx = { sym: b.t.replace("-", "."), file: b.chart ? b.t : null, lines }; renderView();
 }
-function closeSheet() { $("#sheet").classList.remove("open"); $("#sheet").setAttribute("aria-hidden", "true"); charts.forEach(c => c.remove()); charts = []; }
+function closeSheet() { $("#sheet").classList.remove("open"); $("#sheet").setAttribute("aria-hidden", "true"); charts.forEach(c => c.remove()); charts = []; $("#liveBox").innerHTML = ""; ctx = null; }
 mk.addEventListener("click", openMarket);
 document.addEventListener("click", e => { const el = e.target.closest("[data-t]"); if (el) openStock(el.dataset.t); });
 $("#tbody").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.dataset.t) openStock(e.target.dataset.t); });
