@@ -465,13 +465,20 @@ def today_signal(d, sc, buy, sell, state):
 def load_holdings():
     found = {}
     if HOLDINGS_FILE.exists():
-        h = pd.read_csv(HOLDINGS_FILE, comment="#", skipinitialspace=True)
-        h.columns = [str(c).strip().lower() for c in h.columns]
-        for _, r in h.iterrows():
-            t = str(r.get("ticker", "")).strip().upper().replace(".", "-")
-            if t and t != "NAN":
-                bp = pd.to_numeric(r.get("buy_price"), errors="coerce")
-                found[t] = None if pd.isna(bp) else float(bp)
+        # One stock per line: TICKER,PRICE. Header row, blank lines and # comments are optional.
+        for line in HOLDINGS_FILE.read_text(encoding="utf-8-sig").splitlines():
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = [x.strip() for x in line.replace(";", ",").replace("\t", ",").split(",")]
+            t = parts[0].upper().replace(".", "-").replace("$", "")
+            if not t or t == "TICKER":
+                continue
+            try:
+                found[t] = float(parts[1].replace("$", "")) if len(parts) > 1 and parts[1] else None
+            except ValueError:
+                found[t] = None
+                log(f"holdings: couldn't read the price on this line, ignoring the price: {line}")
     for part in os.environ.get("HOLDINGS", "").replace(";", ",").split(","):
         part = part.strip()
         if not part:
