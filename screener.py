@@ -74,6 +74,24 @@ DIST_DAY_LIMIT = 6           # this many distribution days in 25 sessions weaken
 BREAKOUT_VOL = 1.4           # breakout volume must be 1.4x the 50-day average
 BREAKDOWN_VOL = 1.2          # breakdown volume must be 1.2x the 50-day average
 SELL_SIGNAL_MIN_SCORE = 70   # only flag breakdowns in names strong enough to be on your radar
+FLAT_TOLERANCE = 0.01        # breakouts accept a 50-day average that is flat (falling less than 1% in 10 days)
+
+# Early-warning lists (not buy signals on their own)
+TURN_MIN_SCORE = 70          # trend turning: 21-day EMA crossed above the 50-day average...
+TURN_DAYS = 5                # ...within the last 5 trading days
+TIGHT_MIN_SCORE = 80         # tight range: strong stock...
+TIGHT_DAYS = 10              # ...whose last 10 days...
+TIGHT_MAX_RANGE = 0.10       # ...stayed within a 10% high-to-low band...
+TIGHT_SHRINK = 0.75          # ...with daily ranges under 75% of their earlier average...
+TIGHT_NEAR_HIGH = 0.95       # ...and price within 5% of its 50-day high
+
+# Golden cross: 50-day average crosses above the 200-day (death cross: crosses below)
+CROSS_DAYS = 10              # list crosses from the last 10 trading days
+
+# Earnings dates
+EARNINGS_WARN_DAYS = 14      # flag stocks reporting within 14 days
+EARNINGS_FETCH_PER_RUN = 400
+EARNINGS_MIN_SCORE = 60      # look up earnings dates for stocks scoring at least this (plus holdings)
 
 # Your holdings (sell signals). List them in holdings.csv, or in a GitHub secret named
 # HOLDINGS written like  AAPL@185.50, MSFT@410
@@ -191,6 +209,62 @@ def save_cache(cache):
     CACHE_FILE.write_text(json.dumps(cache))
 
 
+def to_date(v):
+    try:
+        if v is None:
+            return None
+        if isinstance(v, (int, float, np.integer, np.floating)):
+            return dt.datetime.utcfromtimestamp(int(v)).date().isoformat()
+        return pd.Timestamp(v).date().isoformat()
+    except Exception:
+        return None
+
+
+def fetch_earnings(t):
+    """Next earnings date (ISO string) or None."""
+    tk = yf.Ticker(t)
+    today = dt.date.today().isoformat()
+    dates = []
+    try:
+        cal = tk.calendar
+        if isinstance(cal, dict):
+            dates = cal.get("Earnings Date") or []
+        elif cal is not None and hasattr(cal, "loc") and "Earnings Date" in cal.index:
+            dates = list(cal.loc["Earnings Date"].values)
+    except Exception:
+        dates = []
+    if not isinstance(dates, (list, tuple)):
+        dates = [dates]
+    found = sorted(x for x in (to_date(v) for v in dates) if x and x >= today)
+    return found[0] if found else None
+
+
+def refresh_earnings(tickers, cache):
+    today = dt.date.today()
+    due = []
+    for t in tickers:
+        c = cache.setdefault(t, {})
+        earn, chk = c.get("earn"), c.get("earn_checked")
+        stale = not chk or (today - dt.date.fromisoformat(chk)).days >= 7
+        if (earn and earn < today.isoformat()) or (not earn and stale) or (earn and stale):
+            due.append(t)
+    due = due[:EARNINGS_FETCH_PER_RUN]
+    log(f"earnings dates: {len(due)} to look up")
+    fails = 0
+    for t in due:
+        try:
+            cache[t]["earn"] = fetch_earnings(t)
+            cache[t]["earn_checked"] = today.isoformat()
+            fails = 0
+        except Exception as e:
+            fails += 1
+            if fails >= 25:
+                log("  too many failures in a row; stopping earnings lookups for today")
+                break
+        time.sleep(FUND_SLEEP)
+    save_cache(cache)
+
+
 def fetch_fundamentals(t):
     tk = yf.Ticker(t)
     info = tk.info or {}
@@ -224,6 +298,8 @@ def fetch_fundamentals(t):
         "total_assets": latest(["Total Assets"]),
         "total_debt": total_debt,
         "cash": cash,
+        "earn": to_date(info.get("earningsTimestampStart") or info.get("earningsTimestamp")),
+        "earn_checked": dt.date.today().isoformat(),
     }
 
 
@@ -430,7 +506,8 @@ def signal_series(d, regime):
     av50 = v.rolling(50).mean().shift(1)
     pivot = h.shift(1).rolling(50).max()
     reg = regime.reindex(d.index).ffill()
-    buy = (c > pivot) & (v > BREAKOUT_VOL * av50) & (c > s50) & (s50 > s50.shift(10)) \
+    buy = (c > pivot) & (v > BREAKOUT_VOL * av50) & (c > s50) \
+        & (s50 >= s50.shift(10) * (1 - FLAT_TOLERANCE)) \
         & (reg != "Downtrend")
     sell = (c < s50) & (c.shift(1) >= s50.shift(1)) & (v > BREAKDOWN_VOL * av50)
     return buy.fillna(False), sell.fillna(False)
@@ -460,6 +537,73 @@ def today_signal(d, sc, buy, sell, state):
         return None
     return {"k": "buy", "why": why, "size": size, "entry": round(last, 2), "stop": round(stop, 2),
             "target": round(last + SETUP_TARGET_R * risk, 2), "risk": round(risk / last, 4)}
+
+
+def trend_turn(d, sc, state):
+    """21-day EMA crossed above the 50-day average recently, price above both."""
+    if sc < TURN_MIN_SCORE or state == "Downtrend":
+        return None
+    c = d["Close"]
+    e21, s50, _ = averages(d)
+    cross = (e21 > s50) & (e21.shift(1) <= s50.shift(1))
+    recent = cross.iloc[-TURN_DAYS:]
+    if not recent.any() or not (c.iloc[-1] > e21.iloc[-1] > s50.iloc[-1]):
+        return None
+    when = recent[recent].index[-1]
+    return {"date": when.strftime("%Y-%m-%d"), "ago": int((c.index > when).sum())}
+
+
+def cross_series(d):
+    _, s50, s200 = averages(d)
+    above = s50 > s200
+    golden = above & ~above.shift(1, fill_value=True) & s200.notna() & s200.shift(1).notna()
+    death = ~above & above.shift(1, fill_value=False) & s200.notna() & s200.shift(1).notna()
+    return golden, death
+
+
+def recent_cross(series, d):
+    recent = series.iloc[-CROSS_DAYS:]
+    if not recent.any():
+        return None
+    when = recent[recent].index[-1]
+    return {"date": when.strftime("%Y-%m-%d"), "ago": int((d.index > when).sum())}
+
+
+def golden_cross(d):
+    golden, death = cross_series(d)
+    g = recent_cross(golden, d)
+    _, s50, s200 = averages(d)
+    if g and s50.iloc[-1] > s200.iloc[-1]:      # still above, not undone since
+        g["above200"] = bool(d["Close"].iloc[-1] > s200.iloc[-1])
+        return g
+    return None
+
+
+def tight_range(d, sc):
+    """Strong stock coiling in a narrow band just under its recent high."""
+    if sc < TIGHT_MIN_SCORE:
+        return None
+    c, h, low = d["Close"], d["High"], d["Low"]
+    e21, s50, _ = averages(d)
+    last = float(c.iloc[-1])
+    hi, lo = float(h.iloc[-TIGHT_DAYS:].max()), float(low.iloc[-TIGHT_DAYS:].min())
+    rng = (h - low) / c
+    recent, before = rng.iloc[-TIGHT_DAYS:].mean(), rng.iloc[-60:-TIGHT_DAYS].mean()
+    ok = ((hi - lo) / last <= TIGHT_MAX_RANGE and before > 0 and recent < TIGHT_SHRINK * before
+          and last >= TIGHT_NEAR_HIGH * float(h.iloc[-50:].max())
+          and last > s50.iloc[-1] and e21.iloc[-1] >= s50.iloc[-1] * 0.99)
+    if not ok:
+        return None
+    entry, stop = round(hi * 1.001, 2), round(lo * 0.99, 2)
+    return {"entry": entry, "stop": stop, "target": round(entry + SETUP_TARGET_R * (entry - stop), 2),
+            "risk": round((entry - stop) / entry, 4), "width": round((hi - lo) / last, 4),
+            "days": TIGHT_DAYS}
+
+
+def earnings_days(earn, asof):
+    if not earn:
+        return None
+    return (dt.date.fromisoformat(earn) - asof).days
 
 
 def load_holdings():
@@ -492,7 +636,8 @@ def load_holdings():
     return found
 
 
-def holding_signal(t, d, buy_price, state, shariah, buy, sell, name):
+def holding_signal(t, d, buy_price, state, shariah, buy, sell, name, earn=None):
+    golden, death = cross_series(d)
     c, low = d["Close"], d["Low"]
     e21, s50, s200 = averages(d)
     last = float(c.iloc[-1])
@@ -518,6 +663,17 @@ def holding_signal(t, d, buy_price, state, shariah, buy, sell, name):
         reasons.append((0, "Hold", "Broke out to a new high today"))
     if shariah is None:
         reasons.append((1, "Watch", "Shariah status not checked yet; verify on Musaffa or Zoya"))
+    dc = recent_cross(death, d)
+    if dc:
+        reasons.append((2, "Watch", f"Death cross on {pd.Timestamp(dc['date']):%d %b}: the 50-day average "
+                                    "fell below the 200-day, a sign the long-term trend has turned down"))
+    gc = recent_cross(golden, d)
+    if gc:
+        reasons.append((0, "Hold", f"Golden cross on {pd.Timestamp(gc['date']):%d %b}: long-term trend turning up"))
+    ed = earnings_days(earn, dt.date.today())
+    if ed is not None and 0 <= ed <= 7:
+        reasons.append((1, "Watch", f"Reports earnings in {ed} day{'s' if ed != 1 else ''}; "
+                                    "expect a big move either way"))
     reasons.sort(key=lambda r: -r[0])
     action = reasons[0][1] if reasons and reasons[0][0] > 0 else "Hold"
     if not reasons or reasons[0][0] == 0:
@@ -527,7 +683,7 @@ def holding_signal(t, d, buy_price, state, shariah, buy, sell, name):
     return {"t": t, "n": name or t, "price": round(last, 2), "chg": clean(c.iloc[-1] / c.iloc[-2] - 1),
             "buy": buy_price, "gain": clean(gain), "action": action,
             "why": [r[2] for r in reasons], "stop": round(stop, 2),
-            "halal": None if shariah is None else bool(shariah[0])}
+            "halal": None if shariah is None else bool(shariah[0]), "earn": earn}
 
 
 # ------------------------------------------------------------------- output --
@@ -543,11 +699,15 @@ def clean(v, nd=4):
 
 
 def write_chart(t, d, buy=None, sell=None, markers=None):
+    m = list(markers or [])
+    if buy is not None:
+        golden, death = cross_series(d)
+        m += [[i.strftime("%Y-%m-%d"), "G", "Golden cross"] for i in golden[golden].index]
+        m += [[i.strftime("%Y-%m-%d"), "D", "Death cross"] for i in death[death].index]
     d = d.iloc[-300:]
     bars = [[i.strftime("%Y-%m-%d"), round(float(r.Open), 2), round(float(r.High), 2),
              round(float(r.Low), 2), round(float(r.Close), 2), int(r.Volume)]
             for i, r in d.iterrows()]
-    m = list(markers or [])
     if buy is not None:
         first = buy & (buy.shift(1).rolling(10).sum().fillna(0) == 0)   # first buy in 10 days
         m += [[i.strftime("%Y-%m-%d"), "B", "Buy"] for i in first[first].index if i >= d.index[0]]
@@ -600,13 +760,20 @@ def main():
     halal = df[df["halal"]].sort_values("score", ascending=False)
     log(f"halal: {len(halal)}  (failed or unchecked: {len(df) - len(halal)})")
 
+    want = [t for t, r in halal.iterrows() if r["score"] >= EARNINGS_MIN_SCORE]
+    refresh_earnings(want + [t for t in holdings if t in prices], cache)
+
     stocks = []
     for t, r in halal.iterrows():
         d = liquid[t]
         setup = find_setup(d, r["score"])
         buy, sell = signal_series(d, regime)
         sig = today_signal(d, r["score"], buy, sell, market["state"])
-        has_chart = bool(setup) or bool(sig) or r["score"] >= CHART_MIN_SCORE
+        turn = trend_turn(d, r["score"], market["state"])
+        tight = None if sig else tight_range(d, r["score"])
+        gold = golden_cross(d)
+        has_chart = bool(setup) or bool(sig) or bool(turn) or bool(tight) or bool(gold) \
+            or r["score"] >= CHART_MIN_SCORE
         if has_chart:
             write_chart(t, d, buy, sell)
         stocks.append({
@@ -619,6 +786,7 @@ def main():
             "epsg": clean(r["eps_growth"]), "salesg": clean(r["sales_growth"]),
             "debt": clean(r["debt_ratio"]), "cash": clean(r["cash_ratio"]),
             "checked": val(r, "checked"), "chart": has_chart, "setup": setup, "sig": sig,
+            "turn": turn, "tight": tight, "gold": gold, "earn": cache.get(t, {}).get("earn"),
         })
 
     held = []
@@ -637,7 +805,8 @@ def main():
             shariah = (ok, reason) if val(row, "checked") else None
         buy, sell = signal_series(d, regime)
         name = cache.get(t, {}).get("name")
-        h = holding_signal(t, d, bp, market["state"], shariah, buy, sell, name)
+        h = holding_signal(t, d, bp, market["state"], shariah, buy, sell, name,
+                           cache.get(t, {}).get("earn"))
         mk = [[d.index[-1].strftime("%Y-%m-%d"), "S" if h["action"] == "Sell" else "C", h["action"]]] \
             if h["action"] in ("Sell", "Trim") else []
         write_chart(t, d, buy, sell, mk)
@@ -652,7 +821,7 @@ def main():
         "built": dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "method": SHARIAH_METHOD, "debtLimit": DEBT_LIMIT, "cashLimit": CASH_LIMIT,
         "universe": len(df), "stocks": stocks, "market": market, "holdings": held,
-        "stopLoss": STOP_LOSS,
+        "stopLoss": STOP_LOSS, "earnWarn": EARNINGS_WARN_DAYS, "turnDays": TURN_DAYS, "crossDays": CROSS_DAYS,
     }
     data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
     (SITE / "index.html").write_text(TEMPLATE.read_text().replace("__DATA__", data))
@@ -660,8 +829,11 @@ def main():
     n_setups = sum(1 for s in stocks if s["setup"])
     n_buy = sum(1 for s in stocks if s["sig"] and s["sig"]["k"] == "buy")
     n_sell = sum(1 for s in stocks if s["sig"] and s["sig"]["k"] == "sell")
+    n_turn = sum(1 for s in stocks if s["turn"])
+    n_tight = sum(1 for s in stocks if s["tight"])
+    n_gold = sum(1 for s in stocks if s["gold"])
     log(f"done: {len(stocks)} halal stocks, {n_setups} setups, {n_buy} buy and {n_sell} sell "
-        f"signals, {len(held)} holdings -> site/index.html")
+        f"signals, {n_turn} trend turns, {n_tight} tight ranges, {n_gold} golden crosses, {len(held)} holdings -> site/index.html")
 
 
 if __name__ == "__main__":
