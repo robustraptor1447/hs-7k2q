@@ -118,7 +118,11 @@ td.s{font-weight:700}
 .chartbox{background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:8px}
 .chartbox h4{margin:2px 4px 6px;font-size:12px;font-weight:500;color:var(--muted)}
 .chart{height:280px}
-.tabs.seg{margin:14px 0 0}
+.tabs.seg{margin:0}
+.viewrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px}
+.moo{display:inline-block;background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:8px 12px;
+  color:var(--text);text-decoration:none;font-weight:500;font-size:14px}
+.moo:hover{border-color:var(--muted)}
 .livebox{margin:10px 0 14px}
 .live{height:440px;background:var(--raise);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 @media (max-width:640px){ .live{height:380px} }
@@ -164,6 +168,15 @@ td.s{font-weight:700}
     <h2>Setups to watch <span id="setupCount"></span></h2>
     <p class="sub">Strong stocks resting on support. They become buy signals if price breaks above the entry.</p>
     <div class="list" id="setups"></div>
+    <h2>Tight ranges <span id="tightCount"></span></h2>
+    <p class="sub">Strong stocks moving sideways in a narrow band near their highs. These often come before a big move. Watch for a break above the top of the range.</p>
+    <div class="list" id="tights"></div>
+    <h2>Trend turning <span id="turnCount"></span></h2>
+    <p class="sub" id="turnSub"></p>
+    <div class="list" id="turns"></div>
+    <h2>Golden crosses <span id="goldCount"></span></h2>
+    <p class="sub" id="goldSub"></p>
+    <div class="list" id="golds"></div>
     <h2>Strongest names</h2>
     <div class="list" id="strongest"></div>
     <div id="holdHelp"></div>
@@ -196,9 +209,12 @@ td.s{font-weight:700}
       <div><h3 id="sTitle"></h3><p id="sSub"></p></div>
       <button class="close" id="close">Close</button>
     </div>
-    <div class="tabs seg" role="tablist" id="view">
-      <button role="tab" data-v="live">Live chart</button>
-      <button role="tab" data-v="sig">Signals and levels</button>
+    <div class="viewrow">
+      <div class="tabs seg" role="tablist" id="view">
+        <button role="tab" data-v="live">Live chart</button>
+        <button role="tab" data-v="sig">Signals and levels</button>
+      </div>
+      <a class="moo" id="moo" target="_blank" rel="noopener">Open in moomoo ↗</a>
     </div>
     <div class="livebox" id="liveWrap" hidden>
       <div class="live" id="liveBox"></div>
@@ -228,6 +244,14 @@ const idxName = {SPY: "S&P 500", QQQ: "Nasdaq 100"};
 
 // ---- header and market banner
 const setups = D.stocks.filter(s => s.setup && !s.sig);
+const tights = D.stocks.filter(s => s.tight);
+const turns = D.stocks.filter(s => s.turn && !s.sig);
+const golds = D.stocks.filter(s => s.gold);
+const DAY_MS = 864e5;
+const earnDays = e => e ? Math.round((new Date(e + "T12:00:00Z") - new Date(new Date().toISOString().slice(0, 10) + "T12:00:00Z")) / DAY_MS) : null;
+const earnSoon = s => { const d = earnDays(s.earn); return d != null && d >= 0 && d <= D.earnWarn ? d : null; };
+const earnText = d => d === 0 ? "Earnings today" : d === 1 ? "Earnings tomorrow" : `Earnings in ${d} days`;
+const earnChip = s => { const d = earnSoon(s); return d == null ? "" : `<span class="chip a-Watch">${d === 0 ? "Earnings today" : `Earnings ${d}d`}</span>`; };
 const buys = D.stocks.filter(s => s.sig && s.sig.k === "buy");
 const sells = D.stocks.filter(s => s.sig && s.sig.k === "sell");
 const ageDays = (Date.now() - new Date(D.asof + "T21:00:00Z")) / 864e5;
@@ -247,7 +271,7 @@ mk.innerHTML = `<div class="mtop"><span class="mstate">${M.state}</span>
 function row(s, extra = "") {
   return `<button class="row" data-t="${esc(s.t)}">
     <span class="score ${sClass(s.score)}">${s.score}</span>
-    <span class="tk">${esc(s.t)}</span>
+    <span class="tk">${esc(s.t)}${earnChip(s)}</span>
     <span class="px">${money(s.price)}</span>
     <span class="nm">${esc(s.n)}</span>
     <span class="ch ${s.chg >= 0 ? "up" : "down"}">${signed(s.chg)}</span>${extra}
@@ -266,13 +290,31 @@ $("#buySub").textContent = {
   Downtrend: "Buy signals are switched off while the market is in a downtrend.",
 }[M.state];
 $("#buys").innerHTML = buys.length
-  ? buys.map(s => row(s, `<div class="why">${esc(s.sig.why)}<small>${esc(s.sig.size)}</small></div>${levels(s.sig)}`)).join("")
+  ? buys.map(s => { const ed = earnSoon(s);
+      const warn = ed != null && ed <= 7 ? `. ${earnText(ed)}: the price can gap either way, so consider waiting or buying smaller` : "";
+      return row(s, `<div class="why">${esc(s.sig.why)}<small>${esc(s.sig.size + warn)}</small></div>${levels(s.sig)}`); }).join("")
   : `<div class="empty">${M.state === "Downtrend" ? "No buys while the market is in a downtrend. Watch the setups below for when it turns." : "No stock gave a buy signal today. Setups below are the ones closest to triggering."}</div>`;
 $("#sells").innerHTML = sells.length
   ? sells.map(s => row(s, `<div class="why">${esc(s.sig.why)}</div>`)).join("")
   : `<div class="empty">No strong stock broke down today.</div>`;
 $("#setups").innerHTML = setups.length ? setups.map(s => row(s, levels(s.setup))).join("")
   : `<div class="empty">No stocks meet the setup rules today. Look again after the next close.</div>`;
+$("#tightCount").textContent = tights.length ? `(${tights.length})` : "";
+$("#tights").innerHTML = tights.length
+  ? tights.map(s => row(s, `<div class="why">${s.tight.days}-day range of ${pct(s.tight.width, 1)}<small>Buy above ${money(s.tight.entry)} if it breaks out on strong volume</small></div>${levels(s.tight)}`)).join("")
+  : `<div class="empty">No strong stock is in a tight range today.</div>`;
+$("#turnCount").textContent = turns.length ? `(${turns.length})` : "";
+$("#turnSub").textContent = M.state === "Downtrend"
+  ? "Switched off while the market is in a downtrend."
+  : `The 21-day average crossed above the 50-day average in the last ${D.turnDays} trading days, in stocks scoring 70+. An early sign the trend is turning up; expect some false starts.`;
+$("#turns").innerHTML = turns.length
+  ? turns.map(s => row(s, `<div class="why">${s.turn.ago === 0 ? "Crossed today" : `Crossed ${day(s.turn.date)}, ${s.turn.ago} trading day${s.turn.ago === 1 ? "" : "s"} ago`}</div>`)).join("")
+  : `<div class="empty">${M.state === "Downtrend" ? "No trend-turning alerts in a downtrend." : "No new crossovers in strong stocks."}</div>`;
+$("#goldCount").textContent = golds.length ? `(${golds.length})` : "";
+$("#goldSub").textContent = `The 50-day average crossed above the 200-day in the last ${D.crossDays} trading days. A slow signal that confirms a long-term uptrend; the price has often already moved.`;
+$("#golds").innerHTML = golds.length
+  ? golds.map(s => row(s, `<div class="why">${s.gold.ago === 0 ? "Crossed today" : `Crossed ${day(s.gold.date)}, ${s.gold.ago} trading day${s.gold.ago === 1 ? "" : "s"} ago`}${s.gold.above200 ? "" : "<small>Price has dipped back below the 200-day average</small>"}</div>`)).join("")
+  : `<div class="empty">No golden crosses in the last ${D.crossDays} trading days.</div>`;
 $("#strongest").innerHTML = D.stocks.slice(0, 10).map(s => row(s)).join("");
 
 // ---- holdings
@@ -308,7 +350,8 @@ function renderHead() {
     `<th class="${cls || ""}" ${k === sortKey ? `aria-sort="${sortDir < 0 ? "descending" : "ascending"}"` : ""}>
       <button data-k="${k}">${label}${k === sortKey ? (sortDir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("");
 }
-const chip = s => s.sig ? `<span class="chip k-${s.sig.k}">${s.sig.k === "buy" ? "Buy" : "Sell"}</span>` : "";
+const chip = s => (s.sig ? `<span class="chip k-${s.sig.k}">${s.sig.k === "buy" ? "Buy" : "Sell"}</span>` : "") +
+  (s.tight ? `<span class="chip a-Hold">Tight</span>` : "") + (s.gold ? `<span class="chip a-Watch">Golden</span>` : "") + earnChip(s);
 function renderTable() {
   const q = $("#q").value.trim().toLowerCase(), f = $("#minScore").value, min = f === "sig" ? 0 : +f;
   let rows = D.stocks.filter(s => s.score >= min && (f !== "sig" || s.sig) &&
@@ -355,7 +398,8 @@ function weekly(d) {
   return [...m.values()];
 }
 function toMarkers(list, weeklyMode) {
-  const style = { B: ["belowBar", "--up", "arrowUp"], S: ["aboveBar", "--down", "arrowDown"], C: ["aboveBar", "--gold", "circle"] };
+  const style = { B: ["belowBar", "--up", "arrowUp"], S: ["aboveBar", "--down", "arrowDown"], C: ["aboveBar", "--gold", "circle"],
+    G: ["belowBar", "--gold", "arrowUp"], D: ["aboveBar", "--gold", "arrowDown"] };
   const seen = new Map();
   list.forEach(([date, code, text]) => {
     const [position, color, shape] = style[code];
@@ -375,7 +419,7 @@ function makeChart(el, data, lines, priceLines, markers, bars) {
   const up = cssVar("--up"), dn = cssVar("--down");
   const cs = c.addCandlestickSeries({ upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn, borderVisible: false });
   cs.setData(data);
-  lines.forEach(([pts, color]) => c.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }).setData(pts));
+  lines.forEach(([pts, color, dashed]) => c.addLineSeries({ color, lineWidth: 1, lineStyle: dashed ? 2 : 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }).setData(pts));
   priceLines.forEach(([title, price, color]) => price != null && cs.createPriceLine({ price, color: cssVar(color), title, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
   const first = data[Math.max(0, data.length - bars)]?.time;
   cs.setMarkers(markers.filter(m => m.time >= first));
@@ -437,7 +481,7 @@ async function drawCharts(file, priceLines) {
     const d = raw.b.map(b => ({ time: b[0], open: b[1], high: b[2], low: b[3], close: b[4] }));
     const w = weekly(d), narrow = innerWidth < 640;
     $("#cD").innerHTML = "";
-    makeChart($("#cD"), d, [[ema(d, 21), cssVar("--gold")], [sma(d, 50), cssVar("--muted")]], priceLines, toMarkers(raw.m, false), narrow ? 80 : 130);
+    makeChart($("#cD"), d, [[ema(d, 21), cssVar("--gold")], [sma(d, 50), cssVar("--muted")], [sma(d, 200), cssVar("--text"), true]], priceLines, toMarkers(raw.m, false), narrow ? 80 : 130);
     makeChart($("#cW"), w, [[sma(w, 10), cssVar("--gold")]], priceLines, toMarkers(raw.m, true), narrow ? 45 : 60);
   } catch (e) { $("#cD").innerHTML = '<div class="empty">Chart data could not be loaded. Refresh the page and try again.</div>'; }
 }
@@ -445,17 +489,18 @@ function openMarket() {
   showSheet();
   $("#sTitle").textContent = `Market: ${M.state}`;
   $("#sSub").textContent = `S&P 500 (SPY). Green arrows mark a new uptrend, red arrows a downtrend, gold dots a turn to caution.`;
-  $("#cDLabel").textContent = "S&P 500 daily, 21 EMA and 50 SMA";
+  $("#cDLabel").textContent = "S&P 500 daily: 21 EMA (gold), 50 SMA (grey), 200 SMA (dashed)";
   $("#facts").innerHTML = textFact("What to do", [M.advice]) +
     M.idx.map(i => fact(idxName[i.t] || i.t, [["Price", money(i.price)], ["Day", signed(i.chg)], ["vs 50-day", signed(i.vs50)], ["vs 200-day", signed(i.vs200)]])).join("") +
     fact("Signal strength", [["Trend points", `${M.points} of 8`], ["Distribution days", `${M.dist} of 25 sessions`], ["In this state since", day(M.since)]]);
+  $("#moo").href = "https://www.moomoo.com/index/.SPX-US";
   ctx = { sym: "SPY", file: "_market", lines: [] }; renderView();
 }
 function openStock(t) {
   const s = byT[t], h = holdByT[t], b = s || h;
   if (!b) return;
   showSheet();
-  $("#cDLabel").textContent = "Daily, 21 EMA and 50 SMA. Green arrows are buy signals, red arrows sell signals";
+  $("#cDLabel").textContent = "Daily: 21 EMA (gold), 50 SMA (grey), 200 SMA (dashed). Green and red arrows are buy and sell signals; gold arrows are golden (up) and death (down) crosses";
   $("#sTitle").textContent = `${b.t}  ${money(b.price)}`;
   $("#sSub").textContent = [b.n, s?.ind].filter(Boolean).join(", ");
   let html = "";
@@ -466,6 +511,12 @@ function openStock(t) {
     ? fact("Buy signal today", [["Entry", money(s.sig.entry)], ["Stop", money(s.sig.stop)], ["Target", money(s.sig.target)], ["Risk", pct(s.sig.risk, 1)]]) + textFact("Why", [s.sig.why, s.sig.size])
     : textFact("Sell signal today", [s.sig.why]);
   if (s?.setup && !s.sig) html += fact("Setup", [["Entry", money(s.setup.entry)], ["Stop", money(s.setup.stop)], ["Target", money(s.setup.target)], ["Risk", pct(s.setup.risk, 1)]]);
+  if (s?.tight) html += fact(`Tight range, ${s.tight.days} days`, [["Buy above", money(s.tight.entry)], ["Stop", money(s.tight.stop)], ["Target", money(s.tight.target)], ["Range", pct(s.tight.width, 1)]]);
+  if (s?.gold) html += textFact("Golden cross", [`50-day average crossed above the 200-day on ${day(s.gold.date)}.`]);
+  if (s?.turn) html += textFact("Trend turning", [`21-day average crossed above the 50-day on ${day(s.turn.date)}.`]);
+  const ed = earnDays(b.earn);
+  if (ed != null && ed >= 0) html += textFact("Next earnings", [`${day(b.earn, { weekday: "short", day: "numeric", month: "short" })}, ${ed === 0 ? "today" : `in ${ed} day${ed === 1 ? "" : "s"}`}.`,
+    ed <= D.earnWarn ? "Prices often gap up or down after earnings." : "Not within the next two weeks."]);
   if (s) {
     const checked = s.checked ? day(s.checked, { month: "short", year: "numeric" }) : "–";
     html += fact(`Score ${s.score}`, [["Relative strength", s.rs], ["EPS growth", s.eps], ["Sales growth", s.sales], ["Volume", s.vol], ["Near 52w high", s.hi], ["Group strength", s.grp]]) +
@@ -473,10 +524,11 @@ function openStock(t) {
       fact("Shariah", [["Debt ratio", pct(s.debt, 1)], ["Cash ratio", pct(s.cash, 1)], ["Last checked", checked]]);
   }
   $("#facts").innerHTML = html;
-  const lv = s?.sig?.k === "buy" ? s.sig : s?.setup;
+  const lv = s?.sig?.k === "buy" ? s.sig : (s?.setup || s?.tight);
   const lines = [];
   if (lv) lines.push(["Entry", lv.entry, "--gold"], ["Stop", lv.stop, "--down"], ["Target", lv.target, "--up"]);
   if (h) lines.push(["Bought", h.buy, "--muted"], ["Stop", lv ? null : h.stop, "--down"]);
+  $("#moo").href = `https://www.moomoo.com/stock/${encodeURIComponent(b.t.replace("-", "."))}-US`;
   ctx = { sym: b.t.replace("-", "."), file: b.chart ? b.t : null, lines }; renderView();
 }
 function closeSheet() { $("#sheet").classList.remove("open"); $("#sheet").setAttribute("aria-hidden", "true"); charts.forEach(c => c.remove()); charts = []; $("#liveBox").innerHTML = ""; ctx = null; }
