@@ -144,8 +144,43 @@ def get_universe():
 
 # ------------------------------------------------------------------ prices --
 
+def split_download(df, part):
+    multi = isinstance(df.columns, pd.MultiIndex)
+    level0 = set(df.columns.get_level_values(0)) if multi else set()
+    for t in part:
+        if multi:
+            if t in level0:
+                yield t, df[t]
+        else:
+            yield t, df
+
+
+def latest_closes(tickers, chunk=200):
+    """Last regular-session price per ticker from hourly bars: {ticker: (NY date, price)}.
+
+    Yahoo sometimes leaves the newest daily bar's close empty for hours after the market
+    closes (the open, high, low and volume are there). Hourly bars still carry the price."""
+    found = {}
+    for i in range(0, len(tickers), chunk):
+        part = tickers[i:i + chunk]
+        try:
+            df = yf.download(part, period="5d", interval="60m", auto_adjust=True,
+                             group_by="ticker", threads=True, progress=False)
+        except Exception as e:
+            log("  hourly download failed:", e)
+            continue
+        for t, d in split_download(df, part):
+            s = d["Close"].dropna() if "Close" in d else pd.Series(dtype=float)
+            if len(s):
+                ts = s.index[-1]
+                ts = ts.tz_convert("America/New_York") if ts.tzinfo else ts
+                found[t] = (ts.date(), float(s.iloc[-1]))
+        time.sleep(1)
+    return found
+
+
 def download_prices(tickers, chunk=200, min_len=260):
-    out = {}
+    raw, need = {}, []
     for i in range(0, len(tickers), chunk):
         part = tickers[i:i + chunk]
         log(f"prices {i + 1}-{i + len(part)} of {len(tickers)}")
@@ -155,19 +190,31 @@ def download_prices(tickers, chunk=200, min_len=260):
         except Exception as e:
             log("  download failed:", e)
             continue
-        multi = isinstance(df.columns, pd.MultiIndex)
-        level0 = set(df.columns.get_level_values(0)) if multi else set()
-        for t in part:
-            if multi:
-                if t not in level0:
-                    continue
-                d = df[t]
-            else:
-                d = df
-            d = d[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
-            if len(d) >= min_len:
-                out[t] = d
+        for t, d in split_download(df, part):
+            d = d[["Open", "High", "Low", "Close", "Volume"]].dropna(how="all").copy()
+            if len(d) and pd.isna(d["Close"].iloc[-1]) and pd.notna(d["Open"].iloc[-1]):
+                need.append(t)
+            raw[t] = d
         time.sleep(1)
+
+    if need:
+        log(f"  newest bar has no close for {len(need)} tickers; filling from hourly data")
+        patch, filled = latest_closes(need), 0
+        for t in need:
+            d = raw[t]
+            if t in patch and patch[t][0] == d.index[-1].date():
+                px = patch[t][1]
+                d.iloc[-1, d.columns.get_loc("Close")] = px
+                d.iloc[-1, d.columns.get_loc("High")] = max(px, d["High"].iloc[-1]) if pd.notna(d["High"].iloc[-1]) else px
+                d.iloc[-1, d.columns.get_loc("Low")] = min(px, d["Low"].iloc[-1]) if pd.notna(d["Low"].iloc[-1]) else px
+                filled += 1
+        log(f"  filled {filled} of {len(need)}")
+
+    out = {}
+    for t, d in raw.items():
+        d = d.dropna(subset=["Close"])
+        if len(d) >= min_len:
+            out[t] = d
     return out
 
 
